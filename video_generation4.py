@@ -8,16 +8,19 @@ import requests
 from moviepy.editor import VideoFileClip, concatenate_videoclips, AudioFileClip, CompositeVideoClip
 import argparse
 import ast
+from eleven_labs_tts import generate_speech
 from scene_environment_generator import SceneEnvironmentGenerator
 from scene_lora_manager import SceneLoraManager
+from elevenlabs import ElevenLabs
 from dotenv import load_dotenv
-from generate_narration import generate_narration_for_video
+import threading
 
 # Load environment variables
 load_dotenv()
 
 # Initialize clients
 gemini_client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
+elevenlabs_client = ElevenLabs(api_key=os.getenv("ELEVEN_LABS_API_KEY"))
 anthropic_api_key = os.getenv("ANTHROPIC_API_KEY")
 luma_client = LumaAI(auth_token=os.getenv("LUMAAI_API_KEY"))
 
@@ -30,6 +33,9 @@ timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 # Define video directory path (but don't create it yet)
 video_dir = f"luma_generated_videos/luma_generation_{timestamp}"
 
+# Add lock for narration audio generation
+narration_lock = threading.Lock()
+
 def generate_physical_environments(num_scenes, script, model="gemini"):
     print(f"There are {num_scenes} scenes in the script.")
     prompt = f"""
@@ -40,7 +46,7 @@ def generate_physical_environments(num_scenes, script, model="gemini"):
     - Weather and atmospheric conditions
     - Time of day
     - Key objects and elements in the scene
-    - Maximum number of physical environments is 5
+    - Maximum number of physical environments is 2
     
     Some scenes will reuse the same physical environment. Across multiple scenes, the physical environment should maintain the same physical environment across two or more scenes.
     Focus on creating a cohesive visual narrative with the physical environment descriptions.
@@ -283,6 +289,7 @@ def combine_metadata_with_environment(num_scenes, script, metadata_path, environ
     for each scene to ensure scene continuity in the physical environment of the video.
     
     Return: array of complete scene descriptions, each containing all metadata fields plus the selected physical environment.
+    Each scene should also include an environment_index field indicating which environment from the list is being used (0-based index).
     """
     
     try:
@@ -303,16 +310,15 @@ def combine_metadata_with_environment(num_scenes, script, metadata_path, environ
                                 'scene_number': {'type': 'integer'},
                                 'scene_name': {'type': 'string'},
                                 'scene_physical_environment': {'type': 'string'},
+                                'environment_index': {'type': 'integer'},
                                 'scene_movement_description': {'type': 'string'},
                                 'scene_emotions': {'type': 'string'},
                                 'scene_camera_movement': {'type': 'string'},
                                 'scene_duration': {'type': 'integer'},
-                                'sound_effects_prompt': {'type': 'string'},
-                                'first_frame_prompt': {'type': 'string'},
-                                'last_frame_prompt': {'type': 'string'}
+                                'sound_effects_prompt': {'type': 'string'}
                             },
                             'required': ['scene_number', 'scene_name', 'scene_physical_environment',
-                                       'scene_movement_description', 'scene_emotions',
+                                       'environment_index', 'scene_movement_description', 'scene_emotions',
                                        'scene_camera_movement', 'sound_effects_prompt']
                         }
                     }
@@ -324,8 +330,7 @@ def combine_metadata_with_environment(num_scenes, script, metadata_path, environ
             import anthropic
             client = anthropic.Anthropic(api_key=anthropic_api_key)
             
-            system_prompt = """You are an expert at combining scene metadata with appropriate physical environments.
-            """
+            system_prompt = """You are an expert at combining scene metadata with appropriate physical environments."""
 
             claude_metadata_with_env_format = """
             {
@@ -334,10 +339,11 @@ def combine_metadata_with_environment(num_scenes, script, metadata_path, environ
                         "scene_number": "integer value",
                         "scene_name": "string value",
                         "scene_physical_environment": "string value",
+                        "environment_index": "integer value",
                         "scene_movement_description": "string value",
                         "scene_emotions": "string value",
                         "scene_camera_movement": "string value",
-                        "scene_duration": "integer value", # 5, 9, or 14
+                        "scene_duration": "integer value",
                         "sound_effects_prompt": "string value"
                     },
                     ...
@@ -356,6 +362,7 @@ def combine_metadata_with_environment(num_scenes, script, metadata_path, environ
                     Script:\n{script}\n\nMetadata:\n{json.dumps(metadata)}\n\nEnvironments:\n{json.dumps(environments)}\n\n{prompt}
                     Output in JSON format like this:
                     {claude_metadata_with_env_format}
+                    Each scene must include an environment_index field (0-based) indicating which environment is being used.
                     '''
                 }]
             )
@@ -372,6 +379,13 @@ def combine_metadata_with_environment(num_scenes, script, metadata_path, environ
         else:
             raise ValueError(f"Unsupported model: {model}")
         
+        # Validate environment indices
+        for scene in final_metadata:
+            if 'environment_index' not in scene:
+                scene['environment_index'] = 0  # Default to first environment if not specified
+            elif scene['environment_index'] >= len(environments):
+                scene['environment_index'] = len(environments) - 1  # Cap at max available environment
+        
         json_path = os.path.join(video_dir, f'scenes_{timestamp}.json')
         with open(json_path, 'w') as f:
             json.dump(final_metadata, f, indent=2)
@@ -381,52 +395,65 @@ def combine_metadata_with_environment(num_scenes, script, metadata_path, environ
     except Exception as e:
         raise e
 
-def generate_scene_metadata(script, model="gemini"):
+def generate_scene_metadata(script, model="gemini", num_scenes=None, temperature=0.7):
     try:
-        # First, determine optimal number of scenes
-        prompt = f"""
-        Analyze this movie script and determine the optimal number of scenes needed to tell the story effectively.
-        Consider that:
-        - Each scene is either {LUMA_VIDEO_GENERATION_DURATION_OPTIONS} seconds long
-        - Scenes should maintain visual continuity
-        - The story should flow naturally
-        - Complex actions may need multiple scenes
-        - The story should be told in a way that is engaging and interesting to watch
-        - Maximum number of scenes is 8
-        Return only a single integer representing the optimal number of scenes. No explanation is needed.
-        """
-        
-        if model == "gemini":
-            response = gemini_client.models.generate_content(
-                model="gemini-2.0-flash-001",
-                contents=[script, prompt],
-                config={
-                    'temperature': 0.7,
-                    'top_p': 0.8,
-                    'top_k': 40
-                }
-            )
-            num_scenes = int(response.text.strip())
+        if not num_scenes:
+            # Determine optimal number of scenes
+            prompt = """
+            Analyze this movie script and determine the optimal number of scenes needed to tell the story effectively.
+            Consider that:
+            - Each scene is either 5 or 9 seconds long
+            - Scenes should maintain visual continuity
+            - The story should flow naturally
+            - Complex actions may need multiple scenes
+            - The story should be told in a way that is engaging and interesting to watch
+            - Maximum number of scenes is 5
+            Return only a single integer representing the optimal number of scenes.
+            """
             
-        elif model == "claude":
-            import anthropic
-            client = anthropic.Anthropic(api_key=anthropic_api_key)
+            if model == "gemini":
+                response = gemini_client.models.generate_content(
+                    model="gemini-2.0-flash-001",
+                    contents=[script, prompt],
+                    config={
+                        'temperature': temperature,
+                        'top_p': 0.8,
+                        'top_k': 40
+                    }
+                )
+                num_scenes = int(response.text.strip())
             
-            response = client.messages.create(
-                model="claude-3-5-sonnet-20241022",
-                max_tokens=100,
-                temperature=0.7,
-                system="You are an expert at analyzing scripts and determining optimal scene counts.",
-                messages=[{"role": "user", "content": f"{script}\n\n{prompt}"}]
-            )
-            num_scenes = int(response.content[0].text.strip())
+            elif model == "claude":
+                import anthropic
+                client = anthropic.Anthropic(api_key=anthropic_api_key)
+                response = client.messages.create(
+                    model="claude-3-5-sonnet-20241022",
+                    max_tokens=100,
+                    temperature=temperature,
+                    system="You are an expert at analyzing scripts and determining optimal scene counts.",
+                    messages=[{"role": "user", "content": f"{script}\n\n{prompt}"}]
+                )
+                num_scenes = int(response.content[0].text.strip())
         
-        print(f"LLM determined optimal number of scenes: {num_scenes}")
+        print(f"Using {num_scenes} scenes")
         
-        # Continue with existing scene generation logic using determined num_scenes
-        environments, env_path = generate_physical_environments(num_scenes, script, model)
-        metadata, metadata_path = generate_metadata_without_environment(num_scenes, script, model)
+        # Generate environments and metadata
+        environments, env_path = generate_physical_environments(num_scenes, script, model, temperature)
+        metadata, metadata_path = generate_metadata_without_environment(num_scenes, script, model, temperature)
+        
+        # Ensure environments have indices
+        for i, env in enumerate(environments):
+            env['environment_index'] = i
+        
+        # Combine metadata with environments
         final_metadata = combine_metadata_with_environment(num_scenes, script, metadata_path, env_path, model)
+        
+        # Validate environment indices
+        for scene in final_metadata:
+            if 'environment_index' not in scene:
+                scene['environment_index'] = 0  # Default to first environment if not specified
+            elif scene['environment_index'] >= len(environments):
+                scene['environment_index'] = len(environments) - 1  # Cap at max available environment
         
         return final_metadata
         
@@ -489,7 +516,7 @@ def generate_scenes(scenes, frame_generation_results):
         {scene['scene_camera_movement']}
         """
         
-        # Get frame data for this video
+        # Get frame paths for this video
         frame_data = next(
             (fr for fr in frame_generation_results 
              if fr["scene_number"] == scene["scene_number"]),
@@ -499,10 +526,6 @@ def generate_scenes(scenes, frame_generation_results):
         if not frame_data:
             print(f"Warning: No frame data found for scene {scene['scene_number']}")
             continue
-            
-        # Get image URLs from frame results
-        first_frame_url = frame_data["first_frame_result"]["images"][0]["url"]
-        last_frame_url = frame_data["last_frame_result"]["images"][0]["url"]
         
         # Generate single video for the scene
         video_path = f"{scene_dir}/scene_{scene['scene_number']}_{timestamp}.mp4"
@@ -510,17 +533,17 @@ def generate_scenes(scenes, frame_generation_results):
         # Create video generation with LoRA-generated frames
         generation_params = {
             "prompt": video_prompt.strip(),
-            # "model": "ray-2",
-            # "resolution": "720p",
-            #"duration": f"{scene_duration}s",
+            "model": "ray-2",
+            "resolution": "720p",
+            "duration": f"{scene_duration}s",
             "keyframes": {
                 "frame0": {
                     "type": "image",
-                    "url": first_frame_url
+                    "url": frame_data["first_frame_path"]
                 },
                 "frame1": {
                     "type": "image",
-                    "url": last_frame_url
+                    "url": frame_data["last_frame_path"]
                 }
             }
         }
@@ -528,58 +551,23 @@ def generate_scenes(scenes, frame_generation_results):
         print("Generate video name: ", video_path)
         print("Generating video with prompt: ", video_prompt.strip())
         print("Video duration: ", scene_duration)
-        print("First frame URL: ", first_frame_url)
-        print("Last frame URL: ", last_frame_url)
         print()
         generation = luma_client.generations.create(**generation_params)
         
         # Wait for completion
-        retry_count = 0
-        max_retries = 3
-        while retry_count < max_retries:
-            try:
-                while True:
-                    generation = luma_client.generations.get(id=generation.id)
-                    if generation.state == "completed":
-                        break
-                    elif generation.state == "failed":
-                        print(f"Generation state: {generation.state}")
-                        print(f"Generation ID: {generation.id}")
-                        print(f"Full generation object: {generation}")
-                        print(f"Failure reason: {generation.failure_reason}")
-                        raise RuntimeError(f"Generation failed: {generation.failure_reason}")
-                    elif generation.state == "error":
-                        print(f"Generation error state: {generation}")
-                        raise RuntimeError(f"Generation error: {generation}")
-                    print(f"Generation status: {generation.state}...")
-                    time.sleep(3)
-                break  # If we get here, generation was successful
-            except Exception as e:
-                retry_count += 1
-                if retry_count >= max_retries:
-                    print(f"Failed after {max_retries} attempts. Last error: {str(e)}")
-                    raise
-                print(f"Attempt {retry_count} failed: {str(e)}. Retrying...")
-                time.sleep(5)  # Wait before retrying
+        while True:
+            generation = luma_client.generations.get(id=generation.id)
+            if generation.state == "completed":
+                break
+            elif generation.state == "failed":
+                raise RuntimeError(f"Generation failed: {generation.failure_reason}")
+            print("Dreaming...")
+            time.sleep(3)
         
         # Download video
-        try:
-            print(f"Downloading video from: {generation.assets.video}")
-            response = requests.get(generation.assets.video, stream=True)
-            response.raise_for_status()  # Raise an error for bad status codes
-            
-            with open(video_path, 'wb') as file:
-                for chunk in response.iter_content(chunk_size=8192):
-                    if chunk:
-                        file.write(chunk)
-            
-            if not os.path.exists(video_path) or os.path.getsize(video_path) == 0:
-                raise RuntimeError(f"Video file is empty or not created: {video_path}")
-                
-            print(f"Video downloaded successfully to: {video_path}")
-        except Exception as e:
-            print(f"Error downloading video: {str(e)}")
-            raise
+        response = requests.get(generation.assets.video, stream=True)
+        with open(video_path, 'wb') as file:
+            file.write(response.content)
         
         # Copy the video to the main directory
         final_video_path = f"{video_dir}/scene_{scene['scene_number']}_{timestamp}.mp4"
@@ -594,36 +582,21 @@ def calculate_total_duration(scenes):
     """Calculate total duration of all scenes in seconds"""
     return sum(scene['scene_duration'] for scene in scenes)
 
-def generate_narration_text(scenes, total_duration, model="gemini"):
+def generate_narration_text(script, total_duration, model="gemini"):
     """
-    Generate narration text based on the scene metadata and desired duration.
-    The narration should be timed to roughly match the video duration.
+    Generate narration text based on the script and desired duration.
+    The narration should be timed to roughly match 4x the video duration.
     """
-    # Create a comprehensive scene description from metadata
-    scene_descriptions = []
-    for scene in scenes:
-        description = f"""
-        {scene['scene_name']}:
-        Environment: {scene['scene_physical_environment']}
-        Action: {scene['scene_movement_description']}
-        Emotional Atmosphere: {scene['scene_emotions']}
-        Camera Movement: {scene['scene_camera_movement']}
-        """
-        scene_descriptions.append(description)
-    
-    combined_description = "\n\n".join(scene_descriptions)
-    
     prompt = f"""
-    Create a narration script based on the scene descriptions below. The narration should:
+    Create a narration script based on the movie script below. The narration should:
     1. Be timed to take approximately {total_duration} seconds when read at a normal pace
     2. Output should be {total_duration * 2} number of words
-    3. Provide context and atmosphere that enhances the visual elements
-    4. Focus on describing key events, emotions, and revelations
-    5. Maintain a consistent tone that matches the story's mood
-    6. Be written in present tense
-    7. Use clear, engaging language suitable for voice-over
-    8. Include natural pauses and breaks in the pacing
-    9. Flow smoothly between scenes while maintaining continuity
+    2. Provide context and atmosphere without duplicating dialogue
+    3. Focus on describing key events, emotions, and revelations
+    4. Maintain a consistent tone that matches the story's mood
+    5. Be written in present tense
+    6. Use clear, engaging language suitable for voice-over
+    7. Include natural pauses and breaks in the pacing
     
     Return the narration text only, without any formatting or additional notes.
     """
@@ -632,7 +605,7 @@ def generate_narration_text(scenes, total_duration, model="gemini"):
         if model == "gemini":
             response = gemini_client.models.generate_content(
                 model="gemini-2.0-flash-001",
-                contents=[combined_description, prompt],
+                contents=[script, prompt],
                 config={
                     'temperature': 0.7,
                     'top_p': 0.8,
@@ -650,7 +623,7 @@ def generate_narration_text(scenes, total_duration, model="gemini"):
                 max_tokens=8192,
                 temperature=0.7,
                 system="You are an expert at writing engaging narration scripts.",
-                messages=[{"role": "user", "content": f"{combined_description}\n\n{prompt}"}]
+                messages=[{"role": "user", "content": f"{script}\n\n{prompt}"}]
             )
             narration = response.content[0].text
             
@@ -667,16 +640,59 @@ def generate_narration_text(scenes, total_duration, model="gemini"):
     except Exception as e:
         raise e
 
-def get_narration_audio_path():
-    """Check if narration audio has been generated separately"""
-    result_path = os.path.join(video_dir, "narration_result.json")
-    if os.path.exists(result_path):
-        with open(result_path, 'r') as f:
-            result = json.load(f)
-        audio_path = result.get("narration_audio_path")
-        if audio_path and os.path.exists(audio_path):
-            return audio_path
-    return None
+def generate_narration_audio(narration_text, target_duration):
+    """
+    Generate audio narration from text and adjust its speed to match target duration.
+    This function is synchronized to ensure only one generation happens at a time.
+    Returns the path to the processed audio file.
+    """
+    try:
+        # Define paths
+        audio_path = os.path.join(video_dir, f'narration_audio_{timestamp}.mp3')
+        adjusted_audio_path = os.path.join(video_dir, f'narration_audio_adjusted_{timestamp}.mp3')
+        
+        # Check if audio has already been generated
+        if os.path.exists(adjusted_audio_path):
+            print(f"Using existing narration audio: {adjusted_audio_path}")
+            return adjusted_audio_path
+            
+        # Check if raw audio has been generated
+        if not os.path.exists(audio_path):
+            print("Generating new narration audio...")
+            success = generate_speech(narration_text, audio_path)
+            if not success:
+                raise RuntimeError("Failed to generate speech audio")
+        else:
+            print(f"Using existing raw audio: {audio_path}")
+            success = True
+        
+        if success:
+            # Load the generated audio to get its duration
+            audio = AudioFileClip(audio_path)
+            original_duration = audio.duration
+            
+            # Calculate the speed factor needed to match target duration
+            speed_factor = original_duration / target_duration
+            
+            # Create speed-adjusted audio using time transformation
+            def speed_change(t):
+                return speed_factor * t
+                
+            adjusted_audio = audio.set_make_frame(lambda t: audio.get_frame(speed_change(t)))
+            adjusted_audio.duration = target_duration
+            
+            # Save the adjusted audio with a valid sample rate
+            adjusted_audio.write_audiofile(adjusted_audio_path, fps=44100)  # Use standard sample rate
+            
+            # Clean up
+            audio.close()
+            adjusted_audio.close()
+            
+            return adjusted_audio_path
+            
+    except Exception as e:
+        print(f"Error generating narration audio: {str(e)}")
+        return None
 
 def stitch_videos(video_files, sound_effect_files, narration_audio_path=None):
     final_clips = []
@@ -748,118 +764,43 @@ def main():
                        help='Model to use for scene generation (default: gemini)')
     parser.add_argument('--metadata_only', action='store_true',
                        help='Only generate scene metadata JSON without video generation')
-    parser.add_argument('--trained_lora_dir', type=str,
-                       help='Directory containing previously trained LoRAs to use for frame generation')
-    parser.add_argument('--narration_only', action='store_true',
-                       help='Only generate narration audio and exit')
-    parser.add_argument('--skip_narration', action='store_true',
-                       help='Skip narration generation and use existing audio')
     args = parser.parse_args()
 
-    if args.trained_lora_dir:
-        print(f"Using pre-trained LoRAs and metadata from: {args.trained_lora_dir}")
-        
-        # Load existing scene metadata
-        scenes_file = next(
-            (f for f in os.listdir(args.trained_lora_dir) if f.startswith('scenes_')),
-            None
-        )
-        if not scenes_file:
-            raise ValueError(f"No scenes metadata file found in {args.trained_lora_dir}")
-        
-        scenes_path = os.path.join(args.trained_lora_dir, scenes_file)
-        print(f"Loading scenes metadata from: {scenes_path}")
-        with open(scenes_path, 'r') as f:
-            scenes = json.load(f)
-            
-        print(f"Loaded metadata for {len(scenes)} scenes")
-        
-        # Load existing LoRA results
-        lora_results_file = next(
-            (f for f in os.listdir(args.trained_lora_dir) if f.startswith('lora_training_results_')),
-            None
-        )
-        if not lora_results_file:
-            raise ValueError(f"No lora_training_results file found in {args.trained_lora_dir}")
-        
-        lora_results_path = os.path.join(args.trained_lora_dir, lora_results_file)
-        print(f"Loading LoRA results from: {lora_results_path}")
-        with open(lora_results_path, 'r') as f:
-            lora_results = json.load(f)
-        
-        if not lora_results:
-            raise ValueError("LoRA results file is empty")
-            
-        print(f"Loaded {len(lora_results)} LoRA results")
-        for lr in lora_results:
-            print(f"LoRA {lr['environment_index']}: {lr['trigger_word']} -> {lr['lora_path']}")
-        
-        # Initialize LoRA manager and generate frames
-        print("Generating frames using existing LoRAs...")
-        lora_manager = SceneLoraManager(video_dir)
-        frame_results, frames_path = lora_manager.generate_scene_frames(scenes, lora_results)
-        
-        if not frame_results:
-            raise RuntimeError("No frames were generated. Check the logs above for errors.")
-    else:
-        # Generate scene metadata with LLM-determined number of scenes
-        print(f"Analyzing script and generating scene metadata using {args.model}...")
-        with open('movie_script2.txt', 'r') as f:
-            script = f.read()
-        scenes = generate_scene_metadata(script, args.model)
-        
-        if args.metadata_only:
-            print(f"Scene metadata JSON generated in: {video_dir}")
-            return
-            
-        # Generate environment prompts and images
-        print("Generating environment prompts and images...")
-        env_generator = SceneEnvironmentGenerator(video_dir)
-        env_prompts, prompts_path = env_generator.generate_environment_prompts(scenes)
-        image_results, images_dir = env_generator.generate_environment_images(env_prompts)
-        
-        # Train LoRAs and generate frames
-        print("Training environment LoRAs and generating frames...")
-        lora_manager = SceneLoraManager(video_dir)
-        zip_files = lora_manager.prepare_training_data(image_results)
-        lora_results, lora_path = lora_manager.train_environment_loras(zip_files, scenes)
-        frame_results, frames_path = lora_manager.generate_scene_frames(scenes, lora_results)
+    # Generate scene metadata with LLM-determined number of scenes
+    print(f"Analyzing script and generating scene metadata using {args.model}...")
+    with open('movie_script2.txt', 'r') as f:
+        script = f.read()
+    scenes = generate_scene_metadata(script, args.model)
+    
+    if args.metadata_only:
+        print(f"Scene metadata JSON generated in: {video_dir}")
+        return
 
     # Calculate total video duration
     total_duration = calculate_total_duration(scenes)
     print(f"Total video duration: {total_duration} seconds")
     
-    # Handle narration
-    narration_audio_path = None
-    if not args.skip_narration:
-        # Generate narration text
-        print("Generating narration text from scene metadata...")
-        narration_text, narration_text_path = generate_narration_text(scenes, total_duration, args.model)
-        print(f"Narration text saved to: {narration_text_path}")
-        
-        if args.narration_only:
-            print("\nGenerating narration audio...")
-            narration_audio_path = generate_narration_for_video(narration_text, total_duration, video_dir)
-            if narration_audio_path:
-                print(f"Narration audio generated successfully: {narration_audio_path}")
-                # Save the path for future use
-                result = {
-                    "narration_audio_path": narration_audio_path,
-                    "timestamp": datetime.now().strftime("%Y%m%d_%H%M%S")
-                }
-                result_path = os.path.join(video_dir, "narration_result.json")
-                with open(result_path, 'w') as f:
-                    json.dump(result, f)
-            else:
-                print("Failed to generate narration audio")
-            return
-    else:
-        # Check for existing narration audio
-        print("Checking for existing narration audio...")
-        narration_audio_path = get_narration_audio_path()
-        if not narration_audio_path:
-            print("No narration audio found. Please run the script with --narration_only first")
-            return
+    # Generate narration text and audio first, before any parallel processing
+    print("Generating narration text...")
+    narration_text, narration_text_path = generate_narration_text(script, total_duration, args.model)
+    
+    print("Generating narration audio...")
+    narration_audio_path = generate_narration_audio(narration_text, total_duration)
+    if not narration_audio_path:
+        print("Warning: Failed to generate narration audio, continuing without narration...")
+    
+    # Generate environment prompts and images
+    print("Generating environment prompts and images...")
+    env_generator = SceneEnvironmentGenerator(video_dir)
+    env_prompts, prompts_path = env_generator.generate_environment_prompts(scenes)
+    image_results, images_dir = env_generator.generate_environment_images(env_prompts)
+    
+    # Train LoRAs and generate frames
+    print("Training environment LoRAs and generating frames...")
+    lora_manager = SceneLoraManager(video_dir)
+    zip_files = lora_manager.prepare_training_data(image_results)
+    lora_results, lora_path = lora_manager.train_environment_loras(zip_files, scenes)
+    frame_results, frames_path = lora_manager.generate_scene_frames(scenes, lora_results)
     
     # Generate videos and sound effects
     print("Generating videos and sound effects...")

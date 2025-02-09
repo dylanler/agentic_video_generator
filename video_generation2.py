@@ -628,21 +628,36 @@ def calculate_total_duration(scenes):
     """Calculate total duration of all scenes in seconds"""
     return sum(scene['scene_duration'] for scene in scenes)
 
-def generate_narration_text(script, total_duration, model="gemini"):
+def generate_narration_text(scenes, total_duration, model="gemini"):
     """
-    Generate narration text based on the script and desired duration.
-    The narration should be timed to roughly match 4x the video duration.
+    Generate narration text based on the scene metadata and desired duration.
+    The narration should be timed to roughly match the video duration.
     """
+    # Create a comprehensive scene description from metadata
+    scene_descriptions = []
+    for scene in scenes:
+        description = f"""
+        {scene['scene_name']}:
+        Environment: {scene['scene_physical_environment']}
+        Action: {scene['scene_movement_description']}
+        Emotional Atmosphere: {scene['scene_emotions']}
+        Camera Movement: {scene['scene_camera_movement']}
+        """
+        scene_descriptions.append(description)
+    
+    combined_description = "\n".join(scene_descriptions)
+    
     prompt = f"""
-    Create a narration script based on the movie script below. The narration should:
+    Create a narration script based on the scene descriptions below. The narration should:
     1. Be timed to take approximately {total_duration} seconds when read at a normal pace
-    2. Output should be {total_duration * 1.7} number of words
-    2. Provide context and atmosphere without duplicating dialogue
-    3. Focus on describing key events, emotions, and revelations
-    4. Maintain a consistent tone that matches the story's mood
-    5. Be written in present tense
-    6. Use clear, engaging language suitable for voice-over
-    7. Include natural pauses and breaks in the pacing
+    2. Output should be {total_duration * 2} number of words
+    3. Provide context and atmosphere that enhances the visual elements
+    4. Focus on describing key events, emotions, and revelations
+    5. Maintain a consistent tone that matches the story's mood
+    6. Be written in present tense
+    7. Use clear, engaging language suitable for voice-over
+    8. Include natural pauses and breaks in the pacing
+    9. Flow smoothly between scenes while maintaining continuity
     
     Return the narration text only, without any formatting or additional notes.
     """
@@ -651,7 +666,7 @@ def generate_narration_text(script, total_duration, model="gemini"):
         if model == "gemini":
             response = gemini_client.models.generate_content(
                 model="gemini-2.0-flash-001",
-                contents=[script, prompt],
+                contents=[combined_description, prompt],
                 config={
                     'temperature': 0.7,
                     'top_p': 0.8,
@@ -669,7 +684,7 @@ def generate_narration_text(script, total_duration, model="gemini"):
                 max_tokens=8192,
                 temperature=0.7,
                 system="You are an expert at writing engaging narration scripts.",
-                messages=[{"role": "user", "content": f"{script}\n\n{prompt}"}]
+                messages=[{"role": "user", "content": f"{combined_description}\n\n{prompt}"}]
             )
             narration = response.content[0].text
             
@@ -815,7 +830,7 @@ def main():
     
     # Generate narration text and audio
     print("Generating narration text...")
-    narration_text, narration_text_path = generate_narration_text(script, total_duration, args.model)
+    narration_text, narration_text_path = generate_narration_text(scenes, total_duration, args.model)
     
     print("Generating narration audio...")
     narration_audio_path = generate_narration_audio(narration_text, total_duration)

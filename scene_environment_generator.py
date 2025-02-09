@@ -28,14 +28,22 @@ def generate_single_image(args):
         return None
 
 class SceneEnvironmentGenerator:
-    def __init__(self):
+    def __init__(self, video_dir):
         self.client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
         self.timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        self.video_dir = video_dir
         
-    def generate_environment_prompts(self, environments):
-        """Generate 10 prompts for each physical environment using Claude."""
+    def generate_environment_prompts(self, scenes):
+        """Generate 10 prompts for each unique physical environment using Claude."""
+        # First, identify unique environments with 1-based indexing
+        unique_environments = {}
+        for scene in scenes:
+            env_desc = scene['scene_physical_environment']
+            if env_desc not in unique_environments:
+                unique_environments[env_desc] = len(unique_environments) + 1  # Changed to 1-based indexing
+        
         prompt = """
-        For each physical environment description, create 10 different prompts that:
+        For each physical environment description, create exactly 10 different prompts that:
         1. Retain the core physical environment description
         2. Add variations of camera angles (e.g., wide shot, close-up, aerial view, etc.)
         3. Include different character positions and interactions
@@ -47,15 +55,17 @@ class SceneEnvironmentGenerator:
             "environment_description": "original description",
             "prompts": [
                 {
-                    "prompt_number": integer,
+                    "prompt_number": integer,  # Must be between 1 and 10
                     "prompt_text": "detailed prompt with camera angle and character placement"
                 }
             ]
         }
+        
+        The prompts array MUST contain exactly 10 items, numbered from 1 to 10.
         """
         
         all_prompts = []
-        for idx, env in enumerate(environments):
+        for env_desc, env_idx in unique_environments.items():
             response = self.client.messages.create(
                 model="claude-3-sonnet-20240229",
                 max_tokens=2000,
@@ -63,26 +73,32 @@ class SceneEnvironmentGenerator:
                 system="You are an expert at creating detailed image generation prompts.",
                 messages=[{
                     "role": "user",
-                    "content": f"Environment description: {env['scene_physical_environment']}\n\n{prompt}"
+                    "content": f"Environment description: {env_desc}\n\n{prompt}"
                 }]
             )
             
             try:
                 env_prompts = json.loads(response.content[0].text)
+                # Ensure exactly 10 prompts
+                if len(env_prompts["prompts"]) != 10:
+                    print(f"Warning: Environment {env_idx} has {len(env_prompts['prompts'])} prompts, truncating to 10")
+                    env_prompts["prompts"] = env_prompts["prompts"][:10]
+                env_prompts["environment_index"] = env_idx  # Ensure correct environment index
                 all_prompts.append(env_prompts)
             except Exception as e:
-                print(f"Error parsing prompts for environment {idx}: {str(e)}")
+                print(f"Error parsing prompts for environment {env_idx}: {str(e)}")
                 continue
         
-        # Save prompts to file
-        output_path = f"scene_physical_environment_prompts_{self.timestamp}.json"
+        # Save prompts to file in video directory
+        output_path = os.path.join(self.video_dir, f'scene_physical_environment_prompts_{self.timestamp}.json')
         with open(output_path, 'w') as f:
             json.dump(all_prompts, f, indent=2)
             
         return all_prompts, output_path
     
-    def generate_environment_images(self, prompts_data, output_dir="scene_environment_images"):
+    def generate_environment_images(self, prompts_data):
         """Generate images for all prompts using multiprocessing."""
+        output_dir = os.path.join(self.video_dir, "environment_images")
         os.makedirs(output_dir, exist_ok=True)
         
         # Prepare arguments for parallel processing
@@ -98,5 +114,10 @@ class SceneEnvironmentGenerator:
             for result in executor.map(generate_single_image, generation_args):
                 if result:
                     results.append(result)
+        
+        # Save image generation results
+        results_path = os.path.join(self.video_dir, f'environment_image_results_{self.timestamp}.json')
+        with open(results_path, 'w') as f:
+            json.dump(results, f, indent=2)
         
         return results, output_dir 
