@@ -48,6 +48,69 @@ graph TD
     I --> J[Final Video]
 ```
 
+### LoRA-Enhanced Video Generation Process
+The `video_generation_with_lora.py` script provides an enhanced version of the video generation process that uses LoRA (Low-Rank Adaptation) models for better scene consistency:
+
+```mermaid
+graph TD
+    A[Movie Script] --> B[Scene Analysis]
+    B --> C[Scene Metadata]
+    B --> D[Environment Prompts]
+    
+    D --> E[Environment Image Generation]
+    E --> F[LoRA Training Data Preparation]
+    F --> G[Train Environment LoRAs]
+    
+    C --> H[Frame Generation with LoRAs]
+    G --> H
+    
+    H --> I[First Frame]
+    H --> J[Last Frame]
+    
+    I --> K[Video Generation]
+    J --> K
+    
+    L[Sound Effects] --> N[Final Video Assembly]
+    M[Narration] --> N
+    K --> N
+    
+    subgraph LoRA Training Process
+        E
+        F
+        G
+    end
+    
+    subgraph Frame Generation
+        H
+        I
+        J
+    end
+    
+    style LoRA Training Process fill:#f9f,stroke:#333,stroke-width:2px
+    style Frame Generation fill:#bbf,stroke:#333,stroke-width:2px
+```
+
+Key differences from the basic video generation:
+1. **Environment LoRA Training**: 
+   - Generates training images for each environment
+   - Trains custom LoRA models for consistent scene aesthetics
+   - Creates environment-specific trigger words
+
+2. **Frame Generation**:
+   - Uses trained LoRAs to generate consistent first/last frames
+   - Maintains visual style across scene transitions
+   - Better environment and character consistency
+
+3. **Video Generation**:
+   - Uses LoRA-generated frames as keyframes
+   - Ensures smooth transitions between scenes
+   - Maintains consistent visual style throughout
+
+4. **Reusability**:
+   - Trained LoRAs can be saved and reused
+   - Supports pre-trained LoRA directory input
+   - Enables consistent style across multiple videos
+
 ## Directory Structure
 
 The system creates the following directory structure during execution:
