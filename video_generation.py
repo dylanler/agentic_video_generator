@@ -11,6 +11,8 @@ import cv2
 from elevenlabs import ElevenLabs
 import argparse
 import ast
+import eleven_labs_tts
+from eleven_labs_tts import generate_speech
 # Load environment variables
 from dotenv import load_dotenv
 load_dotenv()
@@ -21,8 +23,7 @@ elevenlabs_client = ElevenLabs(api_key=os.getenv("ELEVEN_LABS_API_KEY"))
 anthropic_api_key = os.getenv("ANTHROPIC_API_KEY")
 
 # Add video duration configuration
-VIDEO_DURATION_SECONDS = 9  # Duration in seconds
-VIDEO_DURATION_STRING = f"{VIDEO_DURATION_SECONDS}s"  # Duration as string with 's' suffix
+LUMA_VIDEO_GENERATION_DURATION_OPTIONS = [5, 9, 14, 18]  # Duration in seconds
 
 luma_client = LumaAI(auth_token=os.getenv("LUMAAI_API_KEY"))
 
@@ -43,9 +44,8 @@ def generate_physical_environments(num_scenes, script, model="gemini"):
     - Time of day
     - Key objects and elements in the scene
     
-    Remember that each scene is only {VIDEO_DURATION_SECONDS} seconds long.
-    So if a scene is longer than that, the scene should maintain the same physical environment across two or more scenes.
-    Focus on creating a cohesive visual narrative.
+    Some scenes will reuse the same physical environment. Across multiple scenes, the physical environment should maintain the same physical environment across two or more scenes.
+    Focus on creating a cohesive visual narrative with the physical environment descriptions.
     
     Return: array of objects with format:
     {{
@@ -135,7 +135,7 @@ def generate_metadata_without_environment(num_scenes, script, model="gemini"):
     1. A descriptive scene name that captures the essence of the moment
     2. Movement descriptions including:
        - Character movements and actions
-       - Character appereances should be described in detail
+       - Character appereances should be described in detail along with ethnicity, gender, age, clothing, style, and any other relevant details
        - Character appearances should be consistent with the previous scene's character appearances
        - Object interactions and dynamics
        - Flow of action
@@ -147,6 +147,8 @@ def generate_metadata_without_environment(num_scenes, script, model="gemini"):
        - Shot types (wide, medium, close-up)
        - Camera angles
        - Movement patterns (pan, tilt, dolly, etc.)
+       - Camera movement should be smooth and fluid and not jarring
+       - If a scene does not require camera movement, enter camera movement as "static"
     5. Sound effects focusing on:
        - Environmental sounds
        - Action-related sounds
@@ -154,8 +156,8 @@ def generate_metadata_without_environment(num_scenes, script, model="gemini"):
        - Musical mood suggestions
     6. Take into account the previous scene's movement description, emotions, camera movement, and sound effects prompt when creating the next scene's movement description, emotions, camera movement, and sound effects prompt.
     7. The first scene should have no previous scene movement description, emotions, camera movement, and sound effects prompt, enter string "none".
-    
-    Remember that each scene is only {VIDEO_DURATION_SECONDS} seconds long.
+    8. Also select the duration of the scene from the options of {LUMA_VIDEO_GENERATION_DURATION_OPTIONS} in integer value.
+
     Focus on creating a cohesive visual narrative without any dialogue.
     
     Return: array of objects with format:
@@ -168,6 +170,8 @@ def generate_metadata_without_environment(num_scenes, script, model="gemini"):
         "scene_emotions": "string value",
         "previous_scene_camera_movement": "string value",
         "scene_camera_movement": "string value",
+        "previous_scene_duration": "integer value", # 5, 9, 14, or 18
+        "scene_duration": "integer value", # 5, 9, 14, or 18
         "previous_scene_sound_effects_prompt": "string value",
         "sound_effects_prompt": "string value"
     }}
@@ -224,6 +228,8 @@ def generate_metadata_without_environment(num_scenes, script, model="gemini"):
                         "scene_emotions": "string value",
                         "previous_scene_camera_movement": "string value",
                         "scene_camera_movement": "string value",
+                        "previous_scene_duration": "integer value", # 5, 9, or 14
+                        "scene_duration": "integer value", # 5, 9, or 14
                         "previous_scene_sound_effects_prompt": "string value",
                         "sound_effects_prompt": "string value"
                     },
@@ -300,6 +306,7 @@ def combine_metadata_with_environment(num_scenes, script, metadata_path, environ
                                 'scene_movement_description': {'type': 'string'},
                                 'scene_emotions': {'type': 'string'},
                                 'scene_camera_movement': {'type': 'string'},
+                                'scene_duration': {'type': 'integer'},
                                 'sound_effects_prompt': {'type': 'string'}
                             },
                             'required': ['scene_number', 'scene_name', 'scene_physical_environment',
@@ -328,6 +335,7 @@ def combine_metadata_with_environment(num_scenes, script, metadata_path, environ
                         "scene_movement_description": "string value",
                         "scene_emotions": "string value",
                         "scene_camera_movement": "string value",
+                        "scene_duration": "integer value", # 5, 9, or 14
                         "sound_effects_prompt": "string value"
                     },
                     ...
@@ -377,12 +385,12 @@ def generate_scene_metadata(script, model="gemini"):
         prompt = f"""
         Analyze this movie script and determine the optimal number of scenes needed to tell the story effectively.
         Consider that:
-        - Each scene is {VIDEO_DURATION_SECONDS} seconds long
+        - Each scene is either {LUMA_VIDEO_GENERATION_DURATION_OPTIONS} seconds long
         - Scenes should maintain visual continuity
         - The story should flow naturally
         - Complex actions may need multiple scenes
         - The story should be told in a way that is engaging and interesting to watch
-        - Maximum number of scenes is 20
+        - Maximum number of scenes is 12
         Return only a single integer representing the optimal number of scenes. No explanation is needed.
         """
         
@@ -428,8 +436,8 @@ def generate_scene_metadata(script, model="gemini"):
                 pass
         raise e
 
-def generate_videos(scenes):
-    video_files = []
+def generate_scenes(scenes):
+    scene_video_files = []  # List of lists, each inner list contains videos for one scene
     sound_effect_files = []
     last_frame_path = None
     last_frame_url = None
@@ -437,16 +445,33 @@ def generate_videos(scenes):
     uploader = GCPImageUploader()
     
     for i, scene in enumerate(scenes):
-        print(f"Generating video for Scene {scene['scene_number']}")
-        video_path = f"{video_dir}/scene_{scene['scene_number']}.mp4"
-        sound_effect_path = f"{video_dir}/scene_{scene['scene_number']}_sound.mp3"
+        print(f"Generating videos for Scene {scene['scene_number']}")
+        scene_duration = scene['scene_duration']
+        video_durations = []
+        
+        # Create scene-specific directory
+        scene_dir = f"{video_dir}/scene_{scene['scene_number']}_all_vid_{timestamp}"
+        os.makedirs(scene_dir, exist_ok=True)
+        
+        # Determine video durations based on scene duration
+        if scene_duration == 5 or scene_duration == 9:
+            video_durations = [scene_duration]
+        elif scene_duration == 14:
+            video_durations = [5, 9]
+        elif scene_duration == 18:
+            video_durations = [9, 9]
+        else:
+            raise ValueError(f"Invalid scene duration: {scene_duration}")
+        
+        scene_videos = []  # Store videos for this scene
+        sound_effect_path = f"{scene_dir}/scene_{scene['scene_number']}_sound.mp3"
         
         # Generate sound effect first
         print(f"Generating sound effect for Scene {scene['scene_number']}")
         try:
             sound_effect_generator = elevenlabs_client.text_to_sound_effects.convert(
                 text=scene['sound_effects_prompt'],
-                duration_seconds=VIDEO_DURATION_SECONDS,
+                duration_seconds=scene_duration,
                 prompt_influence=0.5
             )
             
@@ -475,79 +500,249 @@ def generate_videos(scenes):
         {scene['scene_camera_movement']}
         """
         
-        # Create video generation with previous video's last frame if available
-        generation_params = {
-            "prompt": video_prompt.strip(),
-            "model": "ray-2",
-            "resolution": "540p",
-            "duration": VIDEO_DURATION_STRING
-        }
+        # Generate each video segment for the scene
+        segment_last_frame_url = None  # Track last frame URL within the scene
         
-        if i > 0 and last_frame_url:
-            generation_params["keyframes"] = {
-                "frame0": {
-                    "type": "image",
-                    "url": last_frame_url
-                }
-            }
-        
-        generation = luma_client.generations.create(**generation_params)
-        
-        # Wait for completion
-        while True:
-            generation = luma_client.generations.get(id=generation.id)
-            if generation.state == "completed":
-                break
-            elif generation.state == "failed":
-                raise RuntimeError(f"Generation failed: {generation.failure_reason}")
-            print("Dreaming...")
-            time.sleep(3)
-        
-        # Download video
-        response = requests.get(generation.assets.video, stream=True)
-        with open(video_path, 'wb') as file:
-            file.write(response.content)
-        
-        # Extract last frame using OpenCV
-        cap = cv2.VideoCapture(video_path)
-        if not cap.isOpened():
-            raise RuntimeError(f"Could not open video file: {video_path}")
-        
-        frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-        cap.set(cv2.CAP_PROP_POS_FRAMES, frame_count-1)
-        ret, frame = cap.read()
-        
-        frame_path = f"{video_dir}/scene_{scene['scene_number']}_last_frame.jpg"
-        if ret:
-            cv2.imwrite(frame_path, frame)
-            print(f"Successfully extracted last frame to: {frame_path}")
-        else:
-            raise RuntimeError(f"Failed to extract last frame from video: {video_path}")
-        
-        cap.release()
-        
-        # Upload frame to GCP and get signed URL for next scene
-        max_retries = 3
-        retry_count = 0
-        while retry_count < max_retries:
-            new_frame_url = uploader.upload_image(frame_path)
-            if new_frame_url != last_frame_url:
-                last_frame_url = new_frame_url
-                print(f"Successfully uploaded frame with unique URL: {last_frame_url}")
-                break
-            print(f"Got duplicate URL, retrying... (attempt {retry_count + 1}/{max_retries})")
-            time.sleep(2)
-            retry_count += 1
-        
-        if retry_count == max_retries:
-            raise RuntimeError(f"Failed to get unique frame URL for scene {scene['scene_number']}")
+        for vid_idx, duration in enumerate(video_durations, 1):
+            # Use different naming convention based on number of videos in scene
+            if len(video_durations) == 1:
+                video_path = f"{scene_dir}/scene_{scene['scene_number']}_{timestamp}.mp4"
+            else:
+                video_path = f"{scene_dir}/scene_{scene['scene_number']}_vid_{vid_idx}_{timestamp}.mp4"
             
-        video_files.append(video_path)
+            # Create video generation with previous video's last frame if available
+            generation_params = {
+                "prompt": video_prompt.strip(),
+                "model": "ray-2",
+                "resolution": "720p",
+                "duration": f"{duration}s"
+            }
+            
+            # Use last frame from previous scene for first video
+            if vid_idx == 1 and i > 0 and last_frame_url:
+                generation_params["keyframes"] = {
+                    "frame0": {
+                        "type": "image",
+                        "url": last_frame_url
+                    }
+                }
+            # Use last frame from previous video in the same scene
+            elif vid_idx > 1 and segment_last_frame_url:
+                generation_params["keyframes"] = {
+                    "frame0": {
+                        "type": "image",
+                        "url": segment_last_frame_url
+                    }
+                }
+            
+            print("Generate video name: ", video_path)
+            print("Generating video with prompt: ", video_prompt.strip())
+            print("Video duration: ", duration)
+            print()
+            generation = luma_client.generations.create(**generation_params)
+            
+            # Wait for completion
+            while True:
+                generation = luma_client.generations.get(id=generation.id)
+                if generation.state == "completed":
+                    break
+                elif generation.state == "failed":
+                    raise RuntimeError(f"Generation failed: {generation.failure_reason}")
+                print("Dreaming...")
+                time.sleep(3)
+            
+            # Download video
+            response = requests.get(generation.assets.video, stream=True)
+            with open(video_path, 'wb') as file:
+                file.write(response.content)
+            
+            scene_videos.append(video_path)
+            
+            # Extract last frame from each video segment
+            cap = cv2.VideoCapture(video_path)
+            if not cap.isOpened():
+                raise RuntimeError(f"Could not open video file: {video_path}")
+            
+            frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+            cap.set(cv2.CAP_PROP_POS_FRAMES, frame_count-1)
+            ret, frame = cap.read()
+            
+            # Save last frame for each video segment
+            if len(video_durations) == 1:
+                frame_path = f"{scene_dir}/scene_{scene['scene_number']}_last_frame.jpg"
+            else:
+                frame_path = f"{scene_dir}/scene_{scene['scene_number']}_vid_{vid_idx}_last_frame.jpg"
+                
+            if ret:
+                cv2.imwrite(frame_path, frame)
+                print(f"Successfully extracted last frame to: {frame_path}")
+            else:
+                raise RuntimeError(f"Failed to extract last frame from video: {video_path}")
+            
+            cap.release()
+            
+            # Upload frame to GCP and get signed URL
+            max_retries = 3
+            retry_count = 0
+            while retry_count < max_retries:
+                new_frame_url = uploader.upload_image(frame_path)
+                if new_frame_url != segment_last_frame_url:
+                    if vid_idx == len(video_durations):  # If this is the last video in the scene
+                        last_frame_url = new_frame_url  # Save for next scene
+                    else:
+                        segment_last_frame_url = new_frame_url  # Save for next video in this scene
+                    print(f"Successfully uploaded frame with unique URL: {new_frame_url}")
+                    break
+                print(f"Got duplicate URL, retrying... (attempt {retry_count + 1}/{max_retries})")
+                time.sleep(2)
+                retry_count += 1
+            
+            if retry_count == max_retries:
+                raise RuntimeError(f"Failed to get unique frame URL for video {vid_idx} in scene {scene['scene_number']}")
+        
+        # Stitch videos for this scene if there are multiple
+        if len(scene_videos) > 1:
+            scene_clips = [VideoFileClip(video) for video in scene_videos]
+            scene_final = concatenate_videoclips(scene_clips)
+            scene_final_path = f"{video_dir}/scene_{scene['scene_number']}_{timestamp}.mp4"
+            scene_final.write_videofile(scene_final_path)
+            
+            # Close clips
+            for clip in scene_clips:
+                clip.close()
+            
+            scene_video_files.append(scene_final_path)
+        else:
+            # Copy the single video to the main directory as well
+            single_video_path = scene_videos[0]
+            final_video_path = f"{video_dir}/scene_{scene['scene_number']}_{timestamp}.mp4"
+            import shutil
+            shutil.copy2(single_video_path, final_video_path)
+            scene_video_files.append(final_video_path)
+        
         time.sleep(2)
     
-    return video_files, sound_effect_files
+    return scene_video_files, sound_effect_files
 
-def stitch_videos(video_files, sound_effect_files):
+def calculate_total_duration(scenes):
+    """Calculate total duration of all scenes in seconds"""
+    return sum(scene['scene_duration'] for scene in scenes)
+
+def generate_narration_text(scenes, total_duration, model="gemini"):
+    """
+    Generate narration text based on the scene metadata and desired duration.
+    The narration should be timed to roughly match the video duration.
+    """
+    # Create a comprehensive scene description from metadata
+    scene_descriptions = []
+    for scene in scenes:
+        description = f"""
+        {scene['scene_name']}:
+        Environment: {scene['scene_physical_environment']}
+        Action: {scene['scene_movement_description']}
+        Emotional Atmosphere: {scene['scene_emotions']}
+        Camera Movement: {scene['scene_camera_movement']}
+        """
+        scene_descriptions.append(description)
+    
+    combined_description = "\n".join(scene_descriptions)
+    
+    prompt = f"""
+    Create a narration script based on the scene descriptions below. The narration should:
+    1. Be timed to take approximately {total_duration} seconds when read at a normal pace
+    2. Output should be {total_duration * 2} number of words
+    3. Provide context and atmosphere that enhances the visual elements
+    4. Focus on describing key events, emotions, and revelations
+    5. Maintain a consistent tone that matches the story's mood
+    6. Be written in present tense
+    7. Use clear, engaging language suitable for voice-over
+    8. Include natural pauses and breaks in the pacing
+    9. Flow smoothly between scenes while maintaining continuity
+    
+    Return the narration text only, without any formatting or additional notes.
+    """
+    
+    try:
+        if model == "gemini":
+            response = gemini_client.models.generate_content(
+                model="gemini-2.0-flash-001",
+                contents=[combined_description, prompt],
+                config={
+                    'temperature': 0.7,
+                    'top_p': 0.8,
+                    'top_k': 40
+                }
+            )
+            narration = response.text
+            
+        elif model == "claude":
+            import anthropic
+            client = anthropic.Anthropic(api_key=anthropic_api_key)
+            
+            response = client.messages.create(
+                model="claude-3-5-sonnet-20241022",
+                max_tokens=8192,
+                temperature=0.7,
+                system="You are an expert at writing engaging narration scripts.",
+                messages=[{"role": "user", "content": f"{combined_description}\n\n{prompt}"}]
+            )
+            narration = response.content[0].text
+            
+        else:
+            raise ValueError(f"Unsupported model: {model}")
+        
+        # Save narration text
+        narration_path = os.path.join(video_dir, f'narration_text_{timestamp}.txt')
+        with open(narration_path, 'w') as f:
+            f.write(narration)
+        
+        return narration, narration_path
+        
+    except Exception as e:
+        raise e
+
+def generate_narration_audio(narration_text, target_duration):
+    """
+    Generate audio narration from text and adjust its speed to match target duration.
+    Returns the path to the processed audio file.
+    """
+    try:
+        # Generate initial audio using ElevenLabs
+        audio_path = os.path.join(video_dir, f'narration_audio_{timestamp}.mp3')
+        success = generate_speech(narration_text, audio_path)
+        
+        if not success:
+            raise RuntimeError("Failed to generate speech audio")
+        
+        # Load the generated audio to get its duration
+        audio = AudioFileClip(audio_path)
+        original_duration = audio.duration
+        
+        # Calculate the speed factor needed to match target duration
+        speed_factor = original_duration / target_duration
+        
+        # Create speed-adjusted audio using time transformation
+        def speed_change(t):
+            return speed_factor * t
+            
+        adjusted_audio = audio.set_make_frame(lambda t: audio.get_frame(speed_change(t)))
+        adjusted_audio.duration = target_duration
+        
+        # Save the adjusted audio with a valid sample rate
+        adjusted_audio_path = os.path.join(video_dir, f'narration_audio_adjusted_{timestamp}.mp3')
+        adjusted_audio.write_audiofile(adjusted_audio_path, fps=44100)  # Use standard sample rate
+        
+        # Clean up
+        audio.close()
+        adjusted_audio.close()
+        
+        return adjusted_audio_path
+        
+    except Exception as e:
+        print(f"Error generating narration audio: {str(e)}")
+        return None
+
+def stitch_videos(video_files, sound_effect_files, narration_audio_path=None):
     final_clips = []
     
     for video_file, sound_file in zip(video_files, sound_effect_files):
@@ -581,8 +776,27 @@ def stitch_videos(video_files, sound_effect_files):
     if not final_clips:
         raise RuntimeError("No video clips were successfully processed")
     
+    # Concatenate all clips
     final_clip = concatenate_videoclips(final_clips)
     
+    # Add narration audio if provided
+    if narration_audio_path and os.path.exists(narration_audio_path):
+        try:
+            narration_audio = AudioFileClip(narration_audio_path)
+            # Combine original audio with narration
+            final_audio = CompositeVideoClip([final_clip]).audio
+            if final_audio is not None:
+                combined_audio = CompositeVideoClip([
+                    final_clip.set_audio(final_audio.volumex(0.7)),  # Reduce original volume
+                    final_clip.set_audio(narration_audio.volumex(1.0))  # Keep narration at full volume
+                ]).audio
+                final_clip = final_clip.set_audio(combined_audio)
+            else:
+                final_clip = final_clip.set_audio(narration_audio)
+        except Exception as e:
+            print(f"Warning: Failed to add narration audio: {str(e)}")
+    
+    # Write final video
     output_path = f"{video_dir}/luma_final_video_{timestamp}.mp4"
     final_clip.write_videofile(output_path)
     
@@ -610,13 +824,24 @@ def main():
         print(f"Scene metadata JSON generated in: {video_dir}")
         return
 
+    # Calculate total video duration
+    total_duration = calculate_total_duration(scenes)
+    print(f"Total video duration: {total_duration} seconds")
+    
+    # Generate narration text and audio
+    print("Generating narration text...")
+    narration_text, narration_text_path = generate_narration_text(scenes, total_duration, args.model)
+    
+    print("Generating narration audio...")
+    narration_audio_path = generate_narration_audio(narration_text, total_duration)
+
     # Generate videos and sound effects
     print("Generating videos and sound effects...")
-    video_files, sound_effect_files = generate_videos(scenes)
+    video_files, sound_effect_files = generate_scenes(scenes)
     
-    # Stitch videos with sound effects
-    print("Stitching videos together with sound effects...")
-    final_video = stitch_videos(video_files, sound_effect_files)
+    # Stitch videos with sound effects and narration
+    print("Stitching videos together with sound effects and narration...")
+    final_video = stitch_videos(video_files, sound_effect_files, narration_audio_path)
     
     print(f"Final video saved to: {final_video}")
 

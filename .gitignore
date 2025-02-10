@@ -1,6 +1,9 @@
-# Environment files
+# Environment variables
 .env
-.env.*
+*.env
+
+# Google Cloud credentials
+*.json
 
 # Python
 __pycache__/
@@ -8,6 +11,7 @@ __pycache__/
 *$py.class
 *.so
 .Python
+env/
 build/
 develop-eggs/
 dist/
@@ -30,7 +34,24 @@ luma_generated_videos/
 *.mp3
 *.json
 
-# IDE specific files
+# Image files and directories
+*.jpg
+*.jpeg
+*.png
+*.gif
+*.bmp
+*.webp
+product_img/
+scene_frames/
+*/scene_frames/
+*/*/scene_frames/
+
+# Training and Environment Data
+lora_training_data/
+scene_environment_images/
+*/environment_*/
+
+# IDE
 .idea/
 .vscode/
 *.swp
