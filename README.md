@@ -280,6 +280,127 @@ python video_generation.py --model gemini --metadata_only
 
 This project is licensed under the MIT License - see the LICENSE file for details.
 
+## TODO and Future Updates
+
+### Improved Scene Consistency
+
+We plan to implement several advanced techniques to significantly improve scene and character consistency across video generations:
+
+1. **Advanced Environment Frame Generation**
+   - Implement Gaussian Splatting or specialized video generation for physical environments
+   - Generate high-quality first and last frames for each environment type
+   - Support various camera movements:
+     - Panning (left/right)
+     - Tilting (up/down)
+     - Zooming (in/out)
+     - Dolly (forward/backward)
+   - Create a dictionary of pre-generated environment transitions
+   - Allow users to customize and select preferred environment transitions
+
+2. **Character Generation and Integration**
+   - Separate character generation from environment generation
+   - Generate characters independently with specific movement prompts
+   - Maintain consistent character appearance across scenes
+   - Support multiple characters with distinct characteristics
+   - Enable complex character interactions
+
+3. **Foreground-Background Separation**
+   - Integrate [Segment Anything Model (SAM) by Meta](https://segment-anything.com/)
+   - Extract and separate foreground (characters) from background (environment)
+   - Enable precise character placement in environments
+   - Improve character-environment interaction
+   - Support dynamic lighting and shadow adjustments
+
+4. **Enhanced Scene Composition**
+   - Match characters with appropriate environment frames
+   - Align character movements with camera transitions
+   - Ensure lighting consistency between characters and environments
+   - Maintain spatial relationships across scene transitions
+
+5. **LoRA Training Improvements**
+   - Train specialized LoRAs for each physical environment type
+   - Develop character-specific LoRAs for consistent appearance
+   - Create transition-specific LoRAs for smooth scene changes
+   - Enable fine-tuning of existing LoRAs for custom requirements
+
+### Implementation Flow
+
+```mermaid
+graph TD
+    A[Environment Generation] --> B[Frame Extraction]
+    B --> C[Camera Movement Library]
+    D[Character Generation] --> E[SAM Processing]
+    E --> F[Character Library]
+    C --> G[Scene Composition]
+    F --> G
+    G --> H[LoRA Training]
+    H --> I[Final Video Generation]
+```
+
+### Technical Components
+
+1. **Environment Frame Database**
+   ```python
+   environment_frames = {
+       'forest': {
+           'pan_left': {'first_frame': 'url1', 'last_frame': 'url2'},
+           'pan_right': {'first_frame': 'url3', 'last_frame': 'url4'},
+           'zoom_in': {'first_frame': 'url5', 'last_frame': 'url6'},
+           # ... more camera movements
+       },
+       'city_street': {
+           # ... similar structure for each environment
+       }
+   }
+   ```
+
+2. **Character Generation Control**
+   ```python
+   character_config = {
+       'character_id': 'protagonist',
+       'appearance': {
+           'gender': 'female',
+           'age': '30s',
+           'clothing': 'business_suit',
+           'distinct_features': ['red_hair', 'tall']
+       },
+       'movements': ['walking', 'running', 'sitting'],
+       'emotions': ['happy', 'serious', 'concerned']
+   }
+   ```
+
+3. **Scene Composition Rules**
+   ```python
+   scene_rules = {
+       'lighting_match': True,
+       'perspective_match': True,
+       'scale_match': True,
+       'shadow_generation': True,
+       'depth_consistency': True
+   }
+   ```
+
+### Benefits
+
+- More consistent and high-quality video generation
+- Better control over scene transitions
+- Improved character consistency across scenes
+- More realistic character-environment integration
+- Smoother camera movements
+- Enhanced storytelling capabilities
+
+### Getting Started with Development
+
+If you'd like to contribute to these improvements:
+
+1. Fork the repository
+2. Choose a feature from the TODO list
+3. Create a feature branch
+4. Implement and test your changes
+5. Submit a pull request
+
+We welcome contributions and suggestions for additional improvements!
+
 # Luma AI Hackathon Project
 
 ## Environment Setup
