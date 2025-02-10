@@ -1,0 +1,11 @@
+google-generativeai
+lumaai
+elevenlabs
+anthropic
+fal-client
+google-cloud-storage
+moviepy
+opencv-python
+python-dotenv
+gradio
+requests
