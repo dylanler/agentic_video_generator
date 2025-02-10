@@ -10,10 +10,13 @@ def save_api_keys(gemini_key, eleven_labs_key, lumaai_key, anthropic_key, fal_ke
     try:
         # Save the credentials file with original filename
         if credentials_file_obj is not None:
-            original_filename = credentials_file_obj.name
-            credentials_path = os.path.join(os.getcwd(), original_filename)
-            with open(credentials_path, "wb") as f:
-                f.write(credentials_file_obj)
+            # Get the temporary file path from Gradio's file object
+            temp_path = credentials_file_obj.name
+            original_filename = os.path.basename(temp_path)
+            target_path = os.path.join(os.getcwd(), original_filename)
+            
+            # Copy the file from temp location to target location
+            shutil.copy2(temp_path, target_path)
         else:
             return "Error: GCP credentials file is required"
     
@@ -199,7 +202,13 @@ Upload your Google Cloud service account credentials JSON file. You can create o
                 metadata_only = gr.Checkbox(label="Generate Metadata Only", value=False)
                 generate_btn = gr.Button("Generate Video")
             with gr.Column():
-                metadata_output = gr.Textbox(label="Generated Metadata", interactive=False)
+                metadata_output = gr.Textbox(
+                    label="Generated Metadata", 
+                    interactive=False,
+                    lines=20,
+                    max_lines=30,
+                    show_copy_button=True
+                )
                 video_output = gr.Video(label="Generated Video")
         
         # Add example JSON format help
@@ -217,8 +226,27 @@ Upload your Google Cloud service account credentials JSON file. You can create o
         ```
         """)
         
+        def generate_and_show_progress(script_input, model_choice, video_engine, metadata_only, max_scenes, max_environments, custom_env_prompt, custom_environments_file, skip_narration, skip_sound_effects):
+            metadata, video = generate_video(
+                script_input, 
+                model_choice, 
+                video_engine, 
+                metadata_only, 
+                max_scenes, 
+                max_environments, 
+                custom_env_prompt, 
+                custom_environments_file, 
+                skip_narration, 
+                skip_sound_effects
+            )
+            # Return results immediately as they're generated
+            return {
+                metadata_output: metadata,
+                video_output: video
+            }
+
         generate_btn.click(
-            generate_video,
+            generate_and_show_progress,
             inputs=[
                 script_input,
                 model_choice,
