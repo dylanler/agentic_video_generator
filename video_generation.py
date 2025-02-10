@@ -45,7 +45,7 @@ def generate_physical_environments(num_scenes, script, max_environments=3, model
     print(f"There are {num_scenes} scenes in the script.")
     
     # Use custom prompt if provided, otherwise use default
-    base_prompt = """
+    base_prompt = f"""
     Create a JSON array of a bunch of detailed physical environment descriptions based on the movie script.
     Each environment should be detailed and include:
     - Setting details
@@ -393,7 +393,7 @@ def combine_metadata_with_environment(num_scenes, script, metadata_path, environ
     except Exception as e:
         raise e
 
-def generate_scene_metadata(script, model="gemini", max_scenes=5, custom_env_prompt=None, custom_environments=None):
+def generate_scene_metadata(script, model="gemini", max_scenes=5, max_environments=3, custom_env_prompt=None, custom_environments=None):
     try:
         # First, determine optimal number of scenes
         prompt = f"""
@@ -438,8 +438,9 @@ def generate_scene_metadata(script, model="gemini", max_scenes=5, custom_env_pro
         # Continue with existing scene generation logic using determined num_scenes
         environments, env_path = generate_physical_environments(
             num_scenes, 
-            script, 
-            model,
+            script,
+            max_environments=max_environments,
+            model=model,
             custom_prompt=custom_env_prompt,
             custom_environments=custom_environments
         )

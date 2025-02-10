@@ -52,6 +52,7 @@ def generate_video(
     model_choice="gemini", 
     metadata_only=False,
     max_scenes=12,
+    max_environments=3,
     custom_env_prompt=None,
     custom_environments_file=None
 ):
@@ -71,6 +72,7 @@ def generate_video(
             script_text, 
             model=model_choice,
             max_scenes=max_scenes,
+            max_environments=max_environments,
             custom_env_prompt=custom_env_prompt,
             custom_environments=custom_environments
         )
@@ -155,6 +157,13 @@ Upload your Google Cloud service account credentials JSON file. You can create o
                     step=1,
                     label="Maximum Number of Scenes"
                 )
+                max_environments = gr.Slider(
+                    minimum=1,
+                    maximum=10,
+                    value=3,
+                    step=1,
+                    label="Maximum Number of Environments"
+                )
                 custom_env_prompt = gr.Textbox(
                     label="Custom Environment Description Prompt (Optional)",
                     lines=5,
@@ -193,6 +202,7 @@ Upload your Google Cloud service account credentials JSON file. You can create o
                 model_choice,
                 metadata_only,
                 max_scenes,
+                max_environments,
                 custom_env_prompt,
                 custom_environments_file
             ],
