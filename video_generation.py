@@ -405,7 +405,7 @@ def generate_scene_metadata(script, model="gemini", max_scenes=5, max_environmen
         - Complex actions may need multiple scenes
         - The story should be told in a way that is engaging and interesting to watch
         - Maximum number of scenes is {max_scenes}
-        - Scene should not contain any naked people
+        - Scene should not have racist, sexist elements
         - Scene should be artistically pleasing and creative
         Return only a single integer representing the optimal number of scenes. No explanation is needed.
         """
