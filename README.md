@@ -72,6 +72,8 @@ luma_generated_videos/
         ├── scene_[N]_[TIMESTAMP].mp4
         └── scene_[N]_sound.mp3
 ```
+Prompt Flow:
+![Uploading Screenshot 2025-02-09 at 11.03.36 PM.png…]()
 
 Where:
 - `[TIMESTAMP]`: Format YYYYMMDD_HHMMSS
