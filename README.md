@@ -73,7 +73,63 @@ luma_generated_videos/
         └── scene_[N]_sound.mp3
 ```
 Prompt Flow:
-<img width="959" alt="Screenshot 2025-02-09 at 11 03 36 PM" src="https://github.com/user-attachments/assets/d26c8dab-0d95-4e3e-ba85-6c17f5b96535" />
+<img width="959" alt="Screenshot 2025-02-09 at 11 03 36 PM" src="https://github.com/user-attachments/assets/d26c8dab-0d95-4e3e-ba85-6c17f5b96535" />
+
+## Prompt Structure and Video Generation Flow
+
+The system uses a sophisticated prompting structure to ensure consistency across generated video segments:
+
+### Environment Description Prompts
+- Each scene has a single, comprehensive environment description prompt that spans all video segments
+- This "anchor prompt" ensures physical environment consistency across the entire scene
+- Contains detailed descriptions of:
+  - Physical layout and architecture
+  - Lighting conditions
+  - Atmospheric elements
+  - Key environmental features
+  - Time of day and weather conditions
+
+### Scene Metadata Prompts
+- Multiple metadata prompts per scene guide the specific actions and movements
+- Each prompt corresponds to a video segment within the scene
+- Contains:
+  - Character positions and movements
+  - Camera angles and transitions
+  - Specific actions and events
+  - Temporal flow markers
+
+### Video Segmentation
+Due to technical limitations of current video generation models (including LumaAI):
+- Each scene is broken into multiple shorter video segments (5-9 seconds each)
+- Videos are generated with overlapping elements for smooth transitions
+- The consistent environment prompt ensures visual continuity
+- Multiple videos are stitched together to form complete scenes
+
+### Sound Effects
+- Each video segment has corresponding sound effects
+- Effects are synchronized with specific actions
+- Mixed with narration track during final assembly
+
+### Final Assembly
+- Individual video segments are combined using the overlapping sections
+- Sound effects and narration are synchronized
+- Environment consistency across segments creates seamless longer scenes
+- Multiple scenes are combined into the final video production
+
+```mermaid
+graph TD
+    A[Environment Description] --> B[Scene 1 Videos]
+    A --> C[Scene 1 Metadata]
+    C --> B
+    B --> D[Video Segment 1]
+    B --> E[Video Segment 2]
+    B --> F[Video Segment 3]
+    D --> G[Scene Assembly]
+    E --> G
+    F --> G
+    H[Sound Effects] --> G
+    G --> I[Final Scene]
+```
 
 Where:
 - `[TIMESTAMP]`: Format YYYYMMDD_HHMMSS
