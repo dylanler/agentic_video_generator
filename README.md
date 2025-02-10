@@ -311,8 +311,17 @@ The project includes two main video generation scripts:
 Alternatively, you can use the command line interface for basic video generation:
 
 ```bash
+# Basic usage with default script file
 python video_generation.py --model gemini --metadata_only
+
+# Specify a custom script file
+python video_generation.py --model gemini --script_file path/to/your/script.txt
+
+# Generate metadata only with custom script
+python video_generation.py --model gemini --metadata_only --script_file path/to/your/script.txt
 ```
+
+The script file should be a text file containing your movie script. If no script file is specified, it will look for a default `movie_script2.txt` in the current directory.
 
 ## Generation Process
 

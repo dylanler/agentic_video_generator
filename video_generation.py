@@ -33,7 +33,7 @@ timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 # Define video directory path (but don't create it yet)
 video_dir = f"luma_generated_videos/luma_generation_{timestamp}"
 
-def generate_physical_environments(num_scenes, script, model="gemini", custom_prompt=None, custom_environments=None):
+def generate_physical_environments(num_scenes, script, max_environments=3, model="gemini", custom_prompt=None, custom_environments=None):
     # If custom environments are provided, use them directly
     if custom_environments is not None:
         print("Using provided custom environment descriptions")
@@ -53,6 +53,7 @@ def generate_physical_environments(num_scenes, script, model="gemini", custom_pr
     - Weather and atmospheric conditions
     - Time of day
     - Key objects and elements in the scene
+    - Maximum number of physical environments is {max_environments}
     
     Some scenes will reuse the same physical environment. Across multiple scenes, the physical environment should maintain the same physical environment across two or more scenes.
     Focus on creating a cohesive visual narrative with the physical environment descriptions.
@@ -392,7 +393,7 @@ def combine_metadata_with_environment(num_scenes, script, metadata_path, environ
     except Exception as e:
         raise e
 
-def generate_scene_metadata(script, model="gemini", max_scenes=12, custom_env_prompt=None, custom_environments=None):
+def generate_scene_metadata(script, model="gemini", max_scenes=5, custom_env_prompt=None, custom_environments=None):
     try:
         # First, determine optimal number of scenes
         prompt = f"""
@@ -831,12 +832,22 @@ def main():
                        help='Model to use for scene generation (default: gemini)')
     parser.add_argument('--metadata_only', action='store_true',
                        help='Only generate scene metadata JSON without video generation')
+    parser.add_argument('--script_file', type=str, default='movie_script2.txt',
+                       help='Path to the movie script file (default: movie_script2.txt)')
     args = parser.parse_args()
 
     # Generate scene metadata with LLM-determined number of scenes
     print(f"Analyzing script and generating scene metadata using {args.model}...")
-    with open('movie_script2.txt', 'r') as f:
-        script = f.read()
+    try:
+        with open(args.script_file, 'r') as f:
+            script = f.read()
+    except FileNotFoundError:
+        print(f"Error: Script file '{args.script_file}' not found")
+        return
+    except Exception as e:
+        print(f"Error reading script file: {str(e)}")
+        return
+
     scenes = generate_scene_metadata(script, args.model)
     
     if args.metadata_only:
