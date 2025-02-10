@@ -107,6 +107,7 @@ def generate_ltx_video(
     Returns:
         Dict[str, Any]: The API response containing the generated video information.
                        If output_path is provided, also includes 'saved_path' key.
+                       Response includes: seed, video.url, video.file_name, video.file_size
     """
     # Set up the API key
     fal_api_key = os.getenv("FAL_API_KEY")
@@ -138,13 +139,24 @@ def generate_ltx_video(
             on_queue_update=on_queue_update,
         )
         
+        # Extract video URL from the response
+        video_url = result.get('video', {}).get('url')
+        
+        if not video_url:
+            raise ValueError("No video URL found in the API response")
+            
+        # Add video URL to the top level of result for backward compatibility
+        result['video_url'] = video_url
+        
         # Download the video if output path is provided
-        if output_path and 'video_url' in result:
-            saved_path = download_video(result['video_url'], output_path)
+        if output_path:
+            saved_path = download_video(video_url, output_path)
             result['saved_path'] = saved_path
             print(f"Video saved to: {saved_path}")
-        elif 'video_url' in result:
-            print(f"Video URL: {result['video_url']}")
+        
+        print(f"Video URL: {video_url}")
+        print(f"Video file name: {result.get('video', {}).get('file_name')}")
+        print(f"Video file size: {result.get('video', {}).get('file_size')} bytes")
         
         return result
     except Exception as e:
@@ -153,14 +165,43 @@ def generate_ltx_video(
 
 # Example usage
 if __name__ == "__main__":
-    # Example 1: Text-to-video with URL return
+    """
+    Example 1: Text-to-Video Generation
+    ---------------------------------
+    # Get just the URL
+    result = generate_ltx_video(
+        prompt="A serene mountain lake at sunset, with gentle ripples on the water..."
+    )
+    
+    # Download to a specific path
+    result = generate_ltx_video(
+        prompt="A serene mountain lake at sunset...",
+        output_path="generated_videos/timestamp/lake_sunset_video.mp4"
+    )
+    
+    Example 2: Image-to-Video Generation
+    ---------------------------------
+    # Get just the URL
+    result = generate_ltx_video(
+        prompt="Transform this image into a dynamic scene...",
+        image_url="https://example.com/your-image.jpg"
+    )
+    
+    # Download to a specific path
+    result = generate_ltx_video(
+        prompt="Transform this image into a dynamic scene...",
+        image_url="https://example.com/your-image.jpg",
+        output_path="generated_videos/timestamp/transformed_video.mp4"
+    )
+    """
+    
+    # Example: Text-to-video generation
     text_prompt = """A serene mountain lake at sunset, with gentle ripples on the water
                     reflecting the orange and purple sky. A small wooden boat gently
                     drifts across the frame from left to right."""
     
     # Get just the URL
     text_result = generate_ltx_video(prompt=text_prompt)
-    print("Video URL:", text_result.get('video_url'))
     
     # Download to a specific path
     from datetime import datetime
@@ -171,17 +212,3 @@ if __name__ == "__main__":
         prompt=text_prompt,
         output_path=f"{output_dir}/lake_sunset_video.mp4"
     )
-    print("Saved video path:", text_result_with_download.get('saved_path'))
-    
-    # Example 2: Image-to-video
-    image_prompt = """Transform this image into a dynamic scene where the camera slowly
-                     circles around the subject, maintaining focus while adding subtle
-                     movement to the environment."""
-    image_url = "https://example.com/your-image.jpg"  # Replace with actual image URL
-    
-    image_result = generate_ltx_video(
-        prompt=image_prompt,
-        image_url=image_url,
-        output_path=f"{output_dir}/transformed_image_video.mp4"
-    )
-    print("Image-to-video saved path:", image_result.get('saved_path'))

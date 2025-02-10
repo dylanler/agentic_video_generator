@@ -16,10 +16,10 @@ from eleven_labs_tts import generate_speech
 # Load environment variables
 from dotenv import load_dotenv
 load_dotenv()
+from ltx_video_generation import generate_ltx_video
 
 # Initialize clients
 gemini_client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
-elevenlabs_client = ElevenLabs(api_key=os.getenv("ELEVEN_LABS_API_KEY"))
 anthropic_api_key = os.getenv("ANTHROPIC_API_KEY")
 
 # Add video duration configuration
@@ -170,7 +170,7 @@ def generate_metadata_without_environment(num_scenes, script, model="gemini"):
        - Musical mood suggestions
     6. Take into account the previous scene's movement description, emotions, camera movement, and sound effects prompt when creating the next scene's movement description, emotions, camera movement, and sound effects prompt.
     7. The first scene should have no previous scene movement description, emotions, camera movement, and sound effects prompt, enter string "none".
-    8. Also select the duration of the scene from the options of {LUMA_VIDEO_GENERATION_DURATION_OPTIONS} in integer value.
+    8. Scene duration must be selected from these options: {LUMA_VIDEO_GENERATION_DURATION_OPTIONS} (in seconds)
 
     Focus on creating a cohesive visual narrative without any dialogue.
     
@@ -211,10 +211,11 @@ def generate_metadata_without_environment(num_scenes, script, model="gemini"):
                                 'scene_movement_description': {'type': 'string'},
                                 'scene_emotions': {'type': 'string'},
                                 'scene_camera_movement': {'type': 'string'},
+                                'scene_duration': {'type': 'integer'},
                                 'sound_effects_prompt': {'type': 'string'}
                             },
                             'required': ['scene_number', 'scene_name', 'scene_movement_description', 
-                                       'scene_emotions', 'scene_camera_movement', 'sound_effects_prompt']
+                                       'scene_emotions', 'scene_camera_movement', 'scene_duration', 'sound_effects_prompt']
                         }
                     }
                 }
@@ -325,7 +326,7 @@ def combine_metadata_with_environment(num_scenes, script, metadata_path, environ
                             },
                             'required': ['scene_number', 'scene_name', 'scene_physical_environment',
                                        'scene_movement_description', 'scene_emotions',
-                                       'scene_camera_movement', 'sound_effects_prompt']
+                                       'scene_camera_movement', 'scene_duration', 'sound_effects_prompt']
                         }
                     }
                 }
@@ -459,7 +460,7 @@ def generate_scene_metadata(script, model="gemini", max_scenes=5, max_environmen
                 pass
         raise e
 
-def generate_scenes(scenes):
+def generate_scenes(scenes, video_engine="luma", skip_sound_effects=False):
     scene_video_files = []  # List of lists, each inner list contains videos for one scene
     sound_effect_files = []
     last_frame_path = None
@@ -469,45 +470,50 @@ def generate_scenes(scenes):
     
     for i, scene in enumerate(scenes):
         print(f"Generating videos for Scene {scene['scene_number']}")
-        scene_duration = scene['scene_duration']
-        video_durations = []
-        
-        # Create scene-specific directory
         scene_dir = f"{video_dir}/scene_{scene['scene_number']}_all_vid_{timestamp}"
         os.makedirs(scene_dir, exist_ok=True)
         
-        # Determine video durations based on scene duration
-        if scene_duration == 5 or scene_duration == 9:
-            video_durations = [scene_duration]
-        elif scene_duration == 14:
-            video_durations = [5, 9]
-        elif scene_duration == 18:
-            video_durations = [9, 9]
+        # For LTX, we only support 5 second videos
+        if video_engine == "ltx":
+            scene_duration = 5
+            video_durations = [5]
         else:
-            raise ValueError(f"Invalid scene duration: {scene_duration}")
+            scene_duration = scene['scene_duration']
+            # Determine video durations based on scene duration
+            if scene_duration == 5 or scene_duration == 9:
+                video_durations = [scene_duration]
+            elif scene_duration == 14:
+                video_durations = [5, 9]
+            elif scene_duration == 18:
+                video_durations = [9, 9]
+            else:
+                raise ValueError(f"Invalid scene duration: {scene_duration}")
         
         scene_videos = []  # Store videos for this scene
-        sound_effect_path = f"{scene_dir}/scene_{scene['scene_number']}_sound.mp3"
         
-        # Generate sound effect first
-        print(f"Generating sound effect for Scene {scene['scene_number']}")
-        try:
-            sound_effect_generator = elevenlabs_client.text_to_sound_effects.convert(
-                text=scene['sound_effects_prompt'],
-                duration_seconds=scene_duration,
-                prompt_influence=0.5
-            )
-            
-            with open(sound_effect_path, 'wb') as f:
-                for chunk in sound_effect_generator:
-                    if chunk is not None:
-                        f.write(chunk)
-            
-            sound_effect_files.append(sound_effect_path)
-            print(f"Sound effect saved to: {sound_effect_path}")
-        except Exception as e:
-            print(f"Failed to generate sound effect: {e}")
+        # Handle sound effects
+        if skip_sound_effects:
             sound_effect_files.append(None)
+        else:
+            sound_effect_path = f"{scene_dir}/scene_{scene['scene_number']}_sound.mp3"
+            print(f"Generating sound effect for Scene {scene['scene_number']}")
+            try:
+                sound_effect_generator = ElevenLabs(api_key=os.getenv("ELEVEN_LABS_API_KEY")).text_to_sound_effects.convert(
+                    text=scene['sound_effects_prompt'],
+                    duration_seconds=scene_duration,
+                    prompt_influence=0.5
+                )
+                
+                with open(sound_effect_path, 'wb') as f:
+                    for chunk in sound_effect_generator:
+                        if chunk is not None:
+                            f.write(chunk)
+                
+                sound_effect_files.append(sound_effect_path)
+                print(f"Sound effect saved to: {sound_effect_path}")
+            except Exception as e:
+                print(f"Failed to generate sound effect: {e}")
+                sound_effect_files.append(None)
         
         # Construct comprehensive video generation prompt
         video_prompt = f"""
@@ -533,51 +539,70 @@ def generate_scenes(scenes):
             else:
                 video_path = f"{scene_dir}/scene_{scene['scene_number']}_vid_{vid_idx}_{timestamp}.mp4"
             
-            # Create video generation with previous video's last frame if available
-            generation_params = {
-                "prompt": video_prompt.strip(),
-                "model": "ray-2",
-                "resolution": "720p",
-                "duration": f"{duration}s"
-            }
-            
-            # Use last frame from previous scene for first video
-            if vid_idx == 1 and i > 0 and last_frame_url:
-                generation_params["keyframes"] = {
-                    "frame0": {
-                        "type": "image",
-                        "url": last_frame_url
-                    }
-                }
-            # Use last frame from previous video in the same scene
-            elif vid_idx > 1 and segment_last_frame_url:
-                generation_params["keyframes"] = {
-                    "frame0": {
-                        "type": "image",
-                        "url": segment_last_frame_url
-                    }
-                }
-            
             print("Generate video name: ", video_path)
             print("Generating video with prompt: ", video_prompt.strip())
             print("Video duration: ", duration)
             print()
-            generation = luma_client.generations.create(**generation_params)
-            
-            # Wait for completion
-            while True:
-                generation = luma_client.generations.get(id=generation.id)
-                if generation.state == "completed":
-                    break
-                elif generation.state == "failed":
-                    raise RuntimeError(f"Generation failed: {generation.failure_reason}")
-                print("Dreaming...")
-                time.sleep(3)
-            
-            # Download video
-            response = requests.get(generation.assets.video, stream=True)
-            with open(video_path, 'wb') as file:
-                file.write(response.content)
+
+            if video_engine == "ltx":
+                # For LTX, use last frame URL as image input if available
+                ltx_args = {
+                    "prompt": video_prompt.strip(),
+                    "output_path": video_path
+                }
+                if vid_idx == 1 and i > 0 and last_frame_url:
+                    ltx_args["image_url"] = last_frame_url
+                elif vid_idx > 1 and segment_last_frame_url:
+                    ltx_args["image_url"] = segment_last_frame_url
+                
+                try:
+                    result = generate_ltx_video(**ltx_args)
+                    if not os.path.exists(video_path):
+                        raise RuntimeError("LTX video generation failed to save the video file")
+                except Exception as e:
+                    raise RuntimeError(f"LTX video generation failed: {str(e)}")
+            else:
+                # Use Luma for video generation
+                generation_params = {
+                    "prompt": video_prompt.strip(),
+                    "model": "ray-2",
+                    "resolution": "720p",
+                    "duration": f"{duration}s"
+                }
+                
+                # Use last frame from previous scene for first video
+                if vid_idx == 1 and i > 0 and last_frame_url:
+                    generation_params["keyframes"] = {
+                        "frame0": {
+                            "type": "image",
+                            "url": last_frame_url
+                        }
+                    }
+                # Use last frame from previous video in the same scene
+                elif vid_idx > 1 and segment_last_frame_url:
+                    generation_params["keyframes"] = {
+                        "frame0": {
+                            "type": "image",
+                            "url": segment_last_frame_url
+                        }
+                    }
+                
+                generation = luma_client.generations.create(**generation_params)
+                
+                # Wait for completion
+                while True:
+                    generation = luma_client.generations.get(id=generation.id)
+                    if generation.state == "completed":
+                        break
+                    elif generation.state == "failed":
+                        raise RuntimeError(f"Generation failed: {generation.failure_reason}")
+                    print("Dreaming...")
+                    time.sleep(3)
+                
+                # Download video
+                response = requests.get(generation.assets.video, stream=True)
+                with open(video_path, 'wb') as file:
+                    file.write(response.content)
             
             scene_videos.append(video_path)
             
@@ -765,10 +790,10 @@ def generate_narration_audio(narration_text, target_duration):
         print(f"Error generating narration audio: {str(e)}")
         return None
 
-def stitch_videos(video_files, sound_effect_files, narration_audio_path=None):
+def stitch_videos(video_files, sound_effect_files=None, narration_audio_path=None):
     final_clips = []
     
-    for video_file, sound_file in zip(video_files, sound_effect_files):
+    for video_file, sound_file in zip(video_files, sound_effect_files or [None] * len(video_files)):
         try:
             video_clip = VideoFileClip(video_file)
             
@@ -802,7 +827,7 @@ def stitch_videos(video_files, sound_effect_files, narration_audio_path=None):
     # Concatenate all clips
     final_clip = concatenate_videoclips(final_clips)
     
-    # Add narration audio if provided
+    # Add narration audio if provided and exists
     if narration_audio_path and os.path.exists(narration_audio_path):
         try:
             narration_audio = AudioFileClip(narration_audio_path)
@@ -833,10 +858,20 @@ def main():
     parser = argparse.ArgumentParser(description='Generate a video based on script analysis')
     parser.add_argument('--model', type=str, choices=['gemini', 'claude'], default='gemini',
                        help='Model to use for scene generation (default: gemini)')
+    parser.add_argument('--video_engine', type=str, choices=['luma', 'ltx'], default='luma',
+                       help='Video generation engine to use (default: luma)')
     parser.add_argument('--metadata_only', action='store_true',
                        help='Only generate scene metadata JSON without video generation')
     parser.add_argument('--script_file', type=str, default='movie_script2.txt',
                        help='Path to the movie script file (default: movie_script2.txt)')
+    parser.add_argument('--skip_narration', action='store_true',
+                       help='Skip narration generation')
+    parser.add_argument('--skip_sound_effects', action='store_true',
+                       help='Skip sound effects generation')
+    parser.add_argument('--max_scenes', type=int, default=5,
+                       help='Maximum number of scenes to generate (default: 5)')
+    parser.add_argument('--max_environments', type=int, default=3,
+                       help='Maximum number of unique environments to use (default: 3)')
     args = parser.parse_args()
 
     # Generate scene metadata with LLM-determined number of scenes
@@ -851,26 +886,35 @@ def main():
         print(f"Error reading script file: {str(e)}")
         return
 
-    scenes = generate_scene_metadata(script, args.model)
+    scenes = generate_scene_metadata(
+        script, 
+        model=args.model,
+        max_scenes=args.max_scenes,
+        max_environments=args.max_environments
+    )
     
     if args.metadata_only:
         print(f"Scene metadata JSON generated in: {video_dir}")
         return
 
-    # Calculate total video duration
-    total_duration = calculate_total_duration(scenes)
-    print(f"Total video duration: {total_duration} seconds")
-    
-    # Generate narration text and audio
-    print("Generating narration text...")
-    narration_text, narration_text_path = generate_narration_text(scenes, total_duration, args.model)
-    
-    print("Generating narration audio...")
-    narration_audio_path = generate_narration_audio(narration_text, total_duration)
+    # Generate narration text and audio if not skipped
+    narration_audio_path = None
+    if not args.skip_narration:
+        # Calculate total duration only if needed for narration
+        total_duration = calculate_total_duration(scenes)
+        print(f"Total video duration: {total_duration} seconds")
+        
+        print("Generating narration text...")
+        narration_text, narration_text_path = generate_narration_text(scenes, total_duration, args.model)
+        
+        print("Generating narration audio...")
+        narration_audio_path = generate_narration_audio(narration_text, total_duration)
+    else:
+        print("Skipping narration generation...")
 
     # Generate videos and sound effects
     print("Generating videos and sound effects...")
-    video_files, sound_effect_files = generate_scenes(scenes)
+    video_files, sound_effect_files = generate_scenes(scenes, args.video_engine, args.skip_sound_effects)
     
     # Stitch videos with sound effects and narration
     print("Stitching videos together with sound effects and narration...")

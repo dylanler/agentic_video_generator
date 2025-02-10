@@ -270,7 +270,12 @@ python video_generation_app.py
 4. In the "Video Generation" tab:
    - Enter your movie script
    - Choose the model (Gemini or Claude)
-   - Optionally check "Generate Metadata Only" to preview scene breakdown
+   - Select video engine (Luma or LTX)
+   - Optional settings:
+     - Skip narration generation
+     - Skip sound effects generation
+     - Generate metadata only
+     - Customize maximum scenes and environments
    - Click "Generate Video"
 
 ### Different Video Generation Scripts
@@ -319,9 +324,26 @@ python video_generation.py --model gemini --script_file path/to/your/script.txt
 
 # Generate metadata only with custom script
 python video_generation.py --model gemini --metadata_only --script_file path/to/your/script.txt
+
+# Skip narration and sound effects
+python video_generation.py --model gemini --skip_narration --skip_sound_effects
+
+# Use LTX engine without narration
+python video_generation.py --model gemini --video_engine ltx --skip_narration
 ```
 
 The script file should be a text file containing your movie script. If no script file is specified, it will look for a default `movie_script2.txt` in the current directory.
+
+### Command Line Arguments
+
+- `--model`: Choose between 'gemini' or 'claude' for scene analysis (default: gemini)
+- `--video_engine`: Choose between 'luma' or 'ltx' for video generation (default: luma)
+- `--metadata_only`: Generate only scene metadata without video
+- `--script_file`: Path to your movie script file
+- `--skip_narration`: Skip generating narration audio
+- `--skip_sound_effects`: Skip generating sound effects
+- `--max_scenes`: Maximum number of scenes to generate (default: 5)
+- `--max_environments`: Maximum number of unique environments to use (default: 3)
 
 ## Generation Process
 

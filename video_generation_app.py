@@ -49,12 +49,15 @@ def load_custom_environments(file_obj):
 
 def generate_video(
     script_text, 
-    model_choice="gemini", 
+    model_choice="gemini",
+    video_engine="luma",
     metadata_only=False,
     max_scenes=12,
     max_environments=3,
     custom_env_prompt=None,
-    custom_environments_file=None
+    custom_environments_file=None,
+    skip_narration=False,
+    skip_sound_effects=False
 ):
     try:
         if not os.getenv("CREDENTIALS_FILE") or not os.path.exists(os.getenv("CREDENTIALS_FILE")):
@@ -80,15 +83,17 @@ def generate_video(
         if metadata_only:
             return json.dumps(scenes, indent=2), None
         
-        # Calculate total duration
-        total_duration = calculate_total_duration(scenes)
-        
-        # Generate narration
-        narration_text, narration_text_path = generate_narration_text(scenes, total_duration, model_choice)
-        narration_audio_path = generate_narration_audio(narration_text, total_duration)
+        # Generate narration if not skipped
+        narration_audio_path = None
+        if not skip_narration:
+            # Calculate total duration only if needed for narration
+            total_duration = calculate_total_duration(scenes)
+            narration_text, narration_text_path = generate_narration_text(scenes, total_duration, model_choice)
+            narration_audio_path = generate_narration_audio(narration_text, total_duration)
         
         # Generate videos and sound effects
-        video_files, sound_effect_files = generate_scenes(scenes)
+        print("Generating videos and sound effects...")
+        video_files, sound_effect_files = generate_scenes(scenes, video_engine, skip_sound_effects)
         
         # Stitch videos with sound effects and narration
         final_video = stitch_videos(video_files, sound_effect_files, narration_audio_path)
@@ -150,6 +155,23 @@ Upload your Google Cloud service account credentials JSON file. You can create o
                     label="Model Choice", 
                     value="gemini"
                 )
+                video_engine = gr.Radio(
+                    choices=["luma", "ltx"],
+                    label="Video Engine",
+                    value="luma",
+                    info="LTX only supports 5-second videos"
+                )
+                with gr.Row():
+                    skip_narration = gr.Checkbox(
+                        label="Skip Narration",
+                        value=False,
+                        info="Skip generating narration audio"
+                    )
+                    skip_sound_effects = gr.Checkbox(
+                        label="Skip Sound Effects",
+                        value=False,
+                        info="Skip generating sound effects"
+                    )
                 max_scenes = gr.Slider(
                     minimum=1,
                     maximum=20,
@@ -200,11 +222,14 @@ Upload your Google Cloud service account credentials JSON file. You can create o
             inputs=[
                 script_input,
                 model_choice,
+                video_engine,
                 metadata_only,
                 max_scenes,
                 max_environments,
                 custom_env_prompt,
-                custom_environments_file
+                custom_environments_file,
+                skip_narration,
+                skip_sound_effects
             ],
             outputs=[metadata_output, video_output]
         )

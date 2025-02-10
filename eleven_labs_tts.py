@@ -45,7 +45,7 @@ def generate_speech(text, output_path="output.mp3", voice_id="JBFqnCBsd6RMkjVDRZ
 
 # Example usage:
 # read txt file
-with open("luma_generated_videos/luma_generation_20250209_043032/narration_text_20250209_043032.txt", "r") as f:
-    speech_text = f.read()
+# with open("luma_generated_videos/luma_generation_20250209_043032/narration_text_20250209_043032.txt", "r") as f:
+#     speech_text = f.read()
 
-generate_speech(speech_text, "narration_audio_20250209_043032.mp3")
+# generate_speech(speech_text, "narration_audio_20250209_043032.mp3")
