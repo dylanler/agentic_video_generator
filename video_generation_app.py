@@ -35,13 +35,45 @@ CREDENTIALS_FILE={original_filename}
     except Exception as e:
         return f"Error saving credentials: {str(e)}"
 
-def generate_video(script_text, model_choice="gemini", metadata_only=False):
+def load_custom_environments(file_obj):
+    try:
+        if file_obj is None:
+            return None
+        content = file_obj.read()
+        if isinstance(content, bytes):
+            content = content.decode('utf-8')
+        return json.loads(content)
+    except Exception as e:
+        print(f"Error loading custom environments: {str(e)}")
+        return None
+
+def generate_video(
+    script_text, 
+    model_choice="gemini", 
+    metadata_only=False,
+    max_scenes=12,
+    custom_env_prompt=None,
+    custom_environments_file=None
+):
     try:
         if not os.getenv("CREDENTIALS_FILE") or not os.path.exists(os.getenv("CREDENTIALS_FILE")):
             return "Error: GCP credentials file not found. Please set up your API keys first.", None
-            
-        # Generate scene metadata
-        scenes = generate_scene_metadata(script_text, model_choice)
+        
+        # Load custom environments if provided
+        custom_environments = None
+        if custom_environments_file:
+            custom_environments = load_custom_environments(custom_environments_file)
+            if custom_environments is None:
+                return "Error: Invalid custom environments JSON file format", None
+        
+        # Generate scene metadata with custom parameters
+        scenes = generate_scene_metadata(
+            script_text, 
+            model=model_choice,
+            max_scenes=max_scenes,
+            custom_env_prompt=custom_env_prompt,
+            custom_environments=custom_environments
+        )
         
         if metadata_only:
             return json.dumps(scenes, indent=2), None
@@ -106,17 +138,64 @@ Upload your Google Cloud service account credentials JSON file. You can create o
         gr.Markdown("## Generate Video from Script")
         with gr.Row():
             with gr.Column():
-                script_input = gr.Textbox(label="Movie Script", lines=10, placeholder="Enter your movie script here...")
-                model_choice = gr.Radio(choices=["gemini", "claude"], label="Model Choice", value="gemini")
+                script_input = gr.Textbox(
+                    label="Movie Script", 
+                    lines=10, 
+                    placeholder="Enter your movie script here..."
+                )
+                model_choice = gr.Radio(
+                    choices=["gemini", "claude"], 
+                    label="Model Choice", 
+                    value="gemini"
+                )
+                max_scenes = gr.Slider(
+                    minimum=1,
+                    maximum=20,
+                    value=12,
+                    step=1,
+                    label="Maximum Number of Scenes"
+                )
+                custom_env_prompt = gr.Textbox(
+                    label="Custom Environment Description Prompt (Optional)",
+                    lines=5,
+                    placeholder="Enter custom prompt for generating physical environment descriptions..."
+                )
+                custom_environments_file = gr.File(
+                    label="Custom Environment Descriptions JSON (Optional)",
+                    file_types=[".json"],
+                    type="binary"
+                )
                 metadata_only = gr.Checkbox(label="Generate Metadata Only", value=False)
                 generate_btn = gr.Button("Generate Video")
             with gr.Column():
                 metadata_output = gr.Textbox(label="Generated Metadata", interactive=False)
                 video_output = gr.Video(label="Generated Video")
         
+        # Add example JSON format help
+        gr.Markdown("""
+        ### Custom Environment JSON Format Example:
+        ```json
+        [
+            {
+                "scene_physical_environment": "A dimly lit urban alley at night, wet cobblestones reflecting neon signs..."
+            },
+            {
+                "scene_physical_environment": "A sun-drenched beach at golden hour, gentle waves lapping at the shore..."
+            }
+        ]
+        ```
+        """)
+        
         generate_btn.click(
             generate_video,
-            inputs=[script_input, model_choice, metadata_only],
+            inputs=[
+                script_input,
+                model_choice,
+                metadata_only,
+                max_scenes,
+                custom_env_prompt,
+                custom_environments_file
+            ],
             outputs=[metadata_output, video_output]
         )
 

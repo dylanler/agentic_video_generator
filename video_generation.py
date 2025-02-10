@@ -33,9 +33,19 @@ timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 # Define video directory path (but don't create it yet)
 video_dir = f"luma_generated_videos/luma_generation_{timestamp}"
 
-def generate_physical_environments(num_scenes, script, model="gemini"):
+def generate_physical_environments(num_scenes, script, model="gemini", custom_prompt=None, custom_environments=None):
+    # If custom environments are provided, use them directly
+    if custom_environments is not None:
+        print("Using provided custom environment descriptions")
+        json_path = os.path.join(video_dir, f'scene_physical_environment_{timestamp}.json')
+        with open(json_path, 'w') as f:
+            json.dump(custom_environments, f, indent=2)
+        return custom_environments, json_path
+
     print(f"There are {num_scenes} scenes in the script.")
-    prompt = f"""
+    
+    # Use custom prompt if provided, otherwise use default
+    base_prompt = """
     Create a JSON array of a bunch of detailed physical environment descriptions based on the movie script.
     Each environment should be detailed and include:
     - Setting details
@@ -46,11 +56,14 @@ def generate_physical_environments(num_scenes, script, model="gemini"):
     
     Some scenes will reuse the same physical environment. Across multiple scenes, the physical environment should maintain the same physical environment across two or more scenes.
     Focus on creating a cohesive visual narrative with the physical environment descriptions.
+    """
     
+    prompt = custom_prompt if custom_prompt else base_prompt
+    prompt += """
     Return: array of objects with format:
-    {{
+    {
         "scene_physical_environment": "detailed string description"
-    }}
+    }
     """
     
     try:
@@ -379,7 +392,7 @@ def combine_metadata_with_environment(num_scenes, script, metadata_path, environ
     except Exception as e:
         raise e
 
-def generate_scene_metadata(script, model="gemini"):
+def generate_scene_metadata(script, model="gemini", max_scenes=12, custom_env_prompt=None, custom_environments=None):
     try:
         # First, determine optimal number of scenes
         prompt = f"""
@@ -390,7 +403,7 @@ def generate_scene_metadata(script, model="gemini"):
         - The story should flow naturally
         - Complex actions may need multiple scenes
         - The story should be told in a way that is engaging and interesting to watch
-        - Maximum number of scenes is 12
+        - Maximum number of scenes is {max_scenes}
         Return only a single integer representing the optimal number of scenes. No explanation is needed.
         """
         
@@ -404,7 +417,7 @@ def generate_scene_metadata(script, model="gemini"):
                     'top_k': 40
                 }
             )
-            num_scenes = int(response.text.strip())
+            num_scenes = min(int(response.text.strip()), max_scenes)
             
         elif model == "claude":
             import anthropic
@@ -417,12 +430,18 @@ def generate_scene_metadata(script, model="gemini"):
                 system="You are an expert at analyzing scripts and determining optimal scene counts.",
                 messages=[{"role": "user", "content": f"{script}\n\n{prompt}"}]
             )
-            num_scenes = int(response.content[0].text.strip())
+            num_scenes = min(int(response.content[0].text.strip()), max_scenes)
         
-        print(f"LLM determined optimal number of scenes: {num_scenes}")
+        print(f"LLM determined optimal number of scenes: {num_scenes} (max allowed: {max_scenes})")
         
         # Continue with existing scene generation logic using determined num_scenes
-        environments, env_path = generate_physical_environments(num_scenes, script, model)
+        environments, env_path = generate_physical_environments(
+            num_scenes, 
+            script, 
+            model,
+            custom_prompt=custom_env_prompt,
+            custom_environments=custom_environments
+        )
         metadata, metadata_path = generate_metadata_without_environment(num_scenes, script, model)
         final_metadata = combine_metadata_with_environment(num_scenes, script, metadata_path, env_path, model)
         
