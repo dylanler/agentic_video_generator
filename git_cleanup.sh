@@ -17,7 +17,7 @@ git filter-branch --force --index-filter \
   *.jpg \
   *.png \
   *.wav \
-  luma_generated_videos/* \
+  generated_videos/* \
   **/scene_frames/* \
   **/lora_training_data/* \
   **/*_output/* \

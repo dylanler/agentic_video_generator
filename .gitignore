@@ -29,7 +29,7 @@ wheels/
 *.egg
 
 # Generated files and directories
-luma_generated_videos/
+generated_videos/
 *.mp4
 *.mp3
 *.json

@@ -116,7 +116,7 @@ Key differences from the basic video generation:
 The system creates the following directory structure during execution:
 
 ```
-luma_generated_videos/
+generated_videos/
 └── luma_generation_[TIMESTAMP]/
     ├── scene_metadata_[TIMESTAMP].json
     ├── scene_physical_environment_[TIMESTAMP].json

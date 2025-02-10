@@ -31,7 +31,7 @@ LUMA_VIDEO_GENERATION_DURATION_OPTIONS = [5, 9]  # Duration in seconds
 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
 # Define video directory path (but don't create it yet)
-video_dir = f"luma_generated_videos/luma_generation_{timestamp}"
+video_dir = f"generated_videos/video_{timestamp}"
 
 # Add lock for narration audio generation
 narration_lock = threading.Lock()

@@ -30,7 +30,7 @@ luma_client = LumaAI(auth_token=os.getenv("LUMAAI_API_KEY"))
 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
 # Define video directory path (but don't create it yet)
-video_dir = f"luma_generated_videos/luma_generation_{timestamp}"
+video_dir = f"generated_videos/video_{timestamp}"
 
 def generate_physical_environments(num_scenes, script, model="gemini"):
     print(f"There are {num_scenes} scenes in the script.")

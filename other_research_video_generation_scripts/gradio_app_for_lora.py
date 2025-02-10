@@ -102,7 +102,7 @@ def process_video_generation(
     try:
         # Create output directory based on timestamp
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        video_dir = f"luma_generated_videos/luma_generation_{timestamp}"
+        video_dir = f"generated_videos/video_{timestamp}"
         os.makedirs(video_dir, exist_ok=True)
         
         # Update scene metadata if provided
