@@ -265,7 +265,9 @@ python video_generation_app.py
    - Enter all required API keys
    - Upload your Google Cloud Service Account credentials JSON file
    - Enter your GCP bucket name
-   - Click "Save API Keys"
+   - Click "Save API Keys" (this will save the keys to the .env file)
+   - Saving API keys is not necessary to use the video generation app
+   - If you do not have the API keys, you can enter "none" and the app will choose the default keys
 
 4. In the "Video Generation" tab:
    - Enter your movie script
