@@ -29,6 +29,7 @@ wheels/
 *.egg
 
 # Generated files and directories
+luma_generated_videos/
 generated_videos/
 *.mp4
 *.mp3
@@ -55,4 +56,4 @@ scene_environment_images/
 .idea/
 .vscode/
 *.swp
-*.swo
+*.swoluma_generated_videos/
