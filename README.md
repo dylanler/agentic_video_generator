@@ -152,9 +152,42 @@ python video_generation_app.py
    - Optionally check "Generate Metadata Only" to preview scene breakdown
    - Click "Generate Video"
 
+### Different Video Generation Scripts
+
+The project includes two main video generation scripts:
+
+1. **video_generation.py** (Used by Gradio App)
+   - Basic video generation without LoRA training
+   - Suitable for simpler video generation needs
+   - Used by the Gradio web interface
+   - Does not require FAL API key
+   - Faster generation but less consistent scene transitions
+
+2. **video_generation_with_lora.py** (Advanced CLI Version)
+   - Advanced version with LoRA training capabilities
+   - Better scene consistency through custom model training
+   - Must be run from command line
+   - Requires FAL API key for LoRA training
+   - Command line usage:
+   ```bash
+   # Generate video with LoRA training
+   python video_generation_with_lora.py --model gemini
+
+   # Use pre-trained LoRAs
+   python video_generation_with_lora.py --model gemini --trained_lora_dir /path/to/lora/dir
+
+   # Generate only narration
+   python video_generation_with_lora.py --narration_only
+
+   # Skip narration generation
+   python video_generation_with_lora.py --skip_narration
+   ```
+
+**Note**: If you don't need LoRA-based scene consistency, use the Gradio app with `video_generation.py`. The FAL API key is only required for `video_generation_with_lora.py` when using LoRA training.
+
 ### Using Command Line
 
-Alternatively, you can use the command line interface:
+Alternatively, you can use the command line interface for basic video generation:
 
 ```bash
 python video_generation.py --model gemini --metadata_only
