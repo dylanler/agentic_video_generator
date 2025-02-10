@@ -117,13 +117,13 @@ The system creates the following directory structure during execution:
 
 ```
 generated_videos/
-└── luma_generation_[TIMESTAMP]/
+└── videos_[TIMESTAMP]/
     ├── scene_metadata_[TIMESTAMP].json
     ├── scene_physical_environment_[TIMESTAMP].json
     ├── narration_text_[TIMESTAMP].txt
     ├── narration_audio_[TIMESTAMP].mp3
     ├── narration_audio_adjusted_[TIMESTAMP].mp3
-    ├── luma_final_video_[TIMESTAMP].mp4
+    ├── final_video_[TIMESTAMP].mp4
     ├── lora_training_data/
     │   └── environment_[N]/
     │       └── [training images]

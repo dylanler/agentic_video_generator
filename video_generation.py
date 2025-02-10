@@ -845,7 +845,7 @@ def stitch_videos(video_files, sound_effect_files=None, narration_audio_path=Non
             print(f"Warning: Failed to add narration audio: {str(e)}")
     
     # Write final video
-    output_path = f"{video_dir}/luma_final_video_{timestamp}.mp4"
+    output_path = f"{video_dir}/final_video_{timestamp}.mp4"
     final_clip.write_videofile(output_path)
     
     # Close all clips
