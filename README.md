@@ -401,16 +401,14 @@ If you'd like to contribute to these improvements:
 
 We welcome contributions and suggestions for additional improvements!
 
-# Luma AI Hackathon Project
-
 ## Environment Setup
 
 This project requires several environment variables to be set up. Create a `.env` file in the root directory with the following variables:
 
 ```env
 # Google Cloud Storage Configuration
-BUCKET_NAME=hackathon-bucket-demandio
-CREDENTIALS_FILE=demand-io-base-c29062a50662.json
+BUCKET_NAME=your-bucket-name
+CREDENTIALS_FILE=your-credentials-file.json
 
 # API Keys and Configuration
 LUMA_API_TOKEN=your_luma_token
