@@ -60,11 +60,19 @@ def generate_video(
     custom_env_prompt=None,
     custom_environments_file=None,
     skip_narration=False,
-    skip_sound_effects=False
+    skip_sound_effects=False,
+    initial_image_path=None,
+    initial_image_prompt=None
 ):
     try:
         if not os.getenv("CREDENTIALS_FILE") or not os.path.exists(os.getenv("CREDENTIALS_FILE")):
             return "Error: GCP credentials file not found. Please set up your API keys first.", None
+        
+        if initial_image_path and initial_image_prompt:
+            return "Error: Cannot provide both initial image path and prompt. Please choose one.", None
+            
+        if initial_image_prompt and not os.getenv("LUMAAI_API_KEY"):
+            return "Error: Luma AI API key is required for image generation.", None
         
         # Load custom environments if provided
         custom_environments = None
@@ -80,7 +88,8 @@ def generate_video(
             max_scenes=max_scenes,
             max_environments=max_environments,
             custom_env_prompt=custom_env_prompt,
-            custom_environments=custom_environments
+            custom_environments=custom_environments,
+            video_engine=video_engine
         )
         
         if metadata_only:
@@ -96,7 +105,13 @@ def generate_video(
         
         # Generate videos and sound effects
         print("Generating videos and sound effects...")
-        video_files, sound_effect_files = generate_scenes(scenes, video_engine, skip_sound_effects)
+        video_files, sound_effect_files = generate_scenes(
+            scenes, 
+            video_engine, 
+            skip_sound_effects,
+            initial_image_path=initial_image_path.name if initial_image_path else None,
+            initial_image_prompt=initial_image_prompt
+        )
         
         # Stitch videos with sound effects and narration
         final_video = stitch_videos(video_files, sound_effect_files, narration_audio_path)
@@ -162,8 +177,28 @@ Upload your Google Cloud service account credentials JSON file. You can create o
                     choices=["luma", "ltx"],
                     label="Video Engine",
                     value="luma",
-                    info="LTX only supports 5-second videos"
+                    info="Choose video generation engine. Note: LTX only supports 5-second videos, while Luma supports 5, 9, 14, or 18 seconds"
                 )
+
+                gr.Markdown("### Initial Frame Options (Optional)")
+                gr.Markdown("Choose ONE of the following options to set the starting frame of the first video:")
+                with gr.Row():
+                    initial_image_path = gr.File(
+                        label="Upload Initial Image",
+                        file_types=["image"],
+                        type="filepath",
+                       
+                    )
+                with gr.Row():
+                    initial_image_prompt = gr.Textbox(
+                        label="Initial Image Generation Prompt (Luma AI API Key Required)",
+                        lines=5,
+                        placeholder="Enter prompt to generate initial image using Luma AI...",
+
+                    )
+                metadata_only = gr.Checkbox(label="Generate Metadata Only", value=False)
+                generate_btn = gr.Button("Generate Video")
+
                 with gr.Row():
                     skip_narration = gr.Checkbox(
                         label="Skip Narration",
@@ -199,8 +234,7 @@ Upload your Google Cloud service account credentials JSON file. You can create o
                     file_types=[".json"],
                     type="binary"
                 )
-                metadata_only = gr.Checkbox(label="Generate Metadata Only", value=False)
-                generate_btn = gr.Button("Generate Video")
+                
             with gr.Column():
                 metadata_output = gr.Textbox(
                     label="Generated Metadata", 
@@ -226,7 +260,32 @@ Upload your Google Cloud service account credentials JSON file. You can create o
         ```
         """)
         
-        def generate_and_show_progress(script_input, model_choice, video_engine, metadata_only, max_scenes, max_environments, custom_env_prompt, custom_environments_file, skip_narration, skip_sound_effects):
+        def generate_and_show_progress(
+            script_input, 
+            model_choice, 
+            video_engine, 
+            metadata_only, 
+            max_scenes, 
+            max_environments, 
+            custom_env_prompt, 
+            custom_environments_file, 
+            skip_narration, 
+            skip_sound_effects,
+            initial_image_path,
+            initial_image_prompt
+        ):
+            if initial_image_path and initial_image_prompt:
+                return {
+                    metadata_output: "Error: Cannot provide both initial image path and prompt. Please choose one.",
+                    video_output: None
+                }
+                
+            if initial_image_prompt and not os.getenv("LUMAAI_API_KEY"):
+                return {
+                    metadata_output: "Error: Luma AI API key is required for image generation.",
+                    video_output: None
+                }
+                
             metadata, video = generate_video(
                 script_input, 
                 model_choice, 
@@ -237,7 +296,9 @@ Upload your Google Cloud service account credentials JSON file. You can create o
                 custom_env_prompt, 
                 custom_environments_file, 
                 skip_narration, 
-                skip_sound_effects
+                skip_sound_effects,
+                initial_image_path,
+                initial_image_prompt
             )
             # Return results immediately as they're generated
             return {
@@ -257,7 +318,9 @@ Upload your Google Cloud service account credentials JSON file. You can create o
                 custom_env_prompt,
                 custom_environments_file,
                 skip_narration,
-                skip_sound_effects
+                skip_sound_effects,
+                initial_image_path,
+                initial_image_prompt
             ],
             outputs=[metadata_output, video_output]
         )

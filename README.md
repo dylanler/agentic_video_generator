@@ -12,6 +12,19 @@ A sophisticated Python application that transforms text scripts into complete vi
 - LoRA training and frame generation
 - Multi-model support (Gemini/Claude)
 - User-friendly Gradio web interface
+- Initial frame customization (via upload or Luma AI generation)
+- Support for custom starting frames with LTX engine
+- Flexible video initialization options:
+  - Upload local images as starting frames
+  - Generate initial frames using Luma AI prompts
+  - Seamless integration with video generation pipeline
+
+> **⚠️ Important Note (February 11, 2025)**: 
+> The Luma AI Ray-2 video generation model currently does not support first and last frame keyframe generation. As a result:
+> - Video generation is only available with the LTX video engine
+> - Attempts to use Luma will result in errors
+> - This limitation is temporary and will be resolved in an upcoming Luma API update
+> - Please use the LTX video engine in the meantime
 
 ## System Architecture
 

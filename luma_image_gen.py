@@ -20,7 +20,8 @@ def generate_image(prompt, output_dir="generated_images"):
         output_dir (str): Directory to save the generated image (default: 'generated_images')
         
     Returns:
-        str: Path to the generated image file
+        tuple: (image_url, filepath) - URL of the generated image and path to the saved file
+               Returns (None, None) if generation fails
     """
     try:
         # Create output directory if it doesn't exist
@@ -39,13 +40,17 @@ def generate_image(prompt, output_dir="generated_images"):
             if generation.state == "completed":
                 completed = True
             elif generation.state == "failed":
-                raise RuntimeError(f"Generation failed: {generation.failure_reason}")
+                print(f"Generation failed: {generation.failure_reason}")
+                return None, None
             print("Dreaming...")
             time.sleep(2)
         
         # Get the image URL
         image_url = generation.assets.image
-        
+        if not image_url:
+            print("No image URL in generation response")
+            return None, None
+            
         # Create a filename with the generation ID
         filename = f"{generation.id}.jpg"
         filepath = os.path.join(output_dir, filename)
@@ -57,18 +62,26 @@ def generate_image(prompt, output_dir="generated_images"):
         with open(filepath, 'wb') as file:
             file.write(response.content)
             
+        if not os.path.exists(filepath):
+            print(f"Failed to save image to {filepath}")
+            return None, None
+            
         print(f"Image successfully generated and saved to: {filepath}")
-        return filepath
+        return image_url, filepath
         
     except Exception as e:
         print(f"Error generating image: {str(e)}")
-        raise
+        return None, None
 
 if __name__ == "__main__":
     # Example usage
     prompt = "A cute robot painting a sunset landscape"
     try:
-        image_path = generate_image(prompt)
-        print(f"Generated image saved at: {image_path}")
+        image_url, image_path = generate_image(prompt)
+        if image_url and image_path:
+            print(f"Generated image URL: {image_url}")
+            print(f"Generated image saved at: {image_path}")
+        else:
+            print("Failed to generate image")
     except Exception as e:
         print(f"Failed to generate image: {str(e)}")
