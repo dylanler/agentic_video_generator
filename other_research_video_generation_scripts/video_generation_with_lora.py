@@ -1,4 +1,10 @@
 import os
+import sys
+
+# Add parent directory to Python path
+parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.append(parent_dir)
+
 import json
 import time
 from datetime import datetime
@@ -12,6 +18,8 @@ from scene_environment_generator import SceneEnvironmentGenerator
 from scene_lora_manager import SceneLoraManager
 from dotenv import load_dotenv
 from generate_narration import generate_narration_for_video
+from ltx_video_generation import generate_ltx_video  # Add LTX import
+import random
 
 # Load environment variables
 load_dotenv()
@@ -22,7 +30,8 @@ anthropic_api_key = os.getenv("ANTHROPIC_API_KEY")
 luma_client = LumaAI(auth_token=os.getenv("LUMAAI_API_KEY"))
 
 # Add video duration configuration
-LUMA_VIDEO_GENERATION_DURATION_OPTIONS = [5, 9]  # Duration in seconds
+LUMA_VIDEO_GENERATION_DURATION_OPTIONS = [5]  # Duration in seconds for ray 1.6
+LTX_VIDEO_GENERATION_DURATION = 5  # LTX only supports 5 second videos
 
 # Get current timestamp
 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -30,7 +39,7 @@ timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 # Define video directory path (but don't create it yet)
 video_dir = f"generated_videos/video_{timestamp}"
 
-def generate_physical_environments(num_scenes, script, model="gemini"):
+def generate_physical_environments(num_scenes, script, model="gemini", max_environments=3):
     print(f"There are {num_scenes} scenes in the script.")
     prompt = f"""
     Create a JSON array of a bunch of detailed physical environment descriptions based on the movie script.
@@ -40,7 +49,7 @@ def generate_physical_environments(num_scenes, script, model="gemini"):
     - Weather and atmospheric conditions
     - Time of day
     - Key objects and elements in the scene
-    - Maximum number of physical environments is 5
+    - Maximum number of physical environments is {max_environments}
     
     Some scenes will reuse the same physical environment. Across multiple scenes, the physical environment should maintain the same physical environment across two or more scenes.
     Focus on creating a cohesive visual narrative with the physical environment descriptions.
@@ -168,8 +177,8 @@ def generate_metadata_without_environment(num_scenes, script, model="gemini"):
         "scene_emotions": "string value",
         "previous_scene_camera_movement": "string value",
         "scene_camera_movement": "string value",
-        "previous_scene_duration": "integer value", # 5, 9, 14, or 18
-        "scene_duration": "integer value", # 5, 9, 14, or 18
+        "previous_scene_duration": "integer value", # select from available options
+        "scene_duration": "integer value", # select from available options
         "previous_scene_sound_effects_prompt": "string value",
         "sound_effects_prompt": "string value"
     }}
@@ -226,8 +235,8 @@ def generate_metadata_without_environment(num_scenes, script, model="gemini"):
                         "scene_emotions": "string value",
                         "previous_scene_camera_movement": "string value",
                         "scene_camera_movement": "string value",
-                        "previous_scene_duration": "integer value", # 5, 9, or 14
-                        "scene_duration": "integer value", # 5, 9, or 14
+                        "previous_scene_duration": "integer value", # select from available options
+                        "scene_duration": "integer value", # select from available options
                         "previous_scene_sound_effects_prompt": "string value",
                         "sound_effects_prompt": "string value",
                         "first_frame_prompt": "string value",
@@ -337,7 +346,7 @@ def combine_metadata_with_environment(num_scenes, script, metadata_path, environ
                         "scene_movement_description": "string value",
                         "scene_emotions": "string value",
                         "scene_camera_movement": "string value",
-                        "scene_duration": "integer value", # 5, 9, or 14
+                        "scene_duration": "integer value", 
                         "sound_effects_prompt": "string value"
                     },
                     ...
@@ -381,7 +390,7 @@ def combine_metadata_with_environment(num_scenes, script, metadata_path, environ
     except Exception as e:
         raise e
 
-def generate_scene_metadata(script, model="gemini"):
+def generate_scene_metadata(script, model="gemini", max_scenes=8, max_environments=3):
     try:
         # First, determine optimal number of scenes
         prompt = f"""
@@ -392,7 +401,7 @@ def generate_scene_metadata(script, model="gemini"):
         - The story should flow naturally
         - Complex actions may need multiple scenes
         - The story should be told in a way that is engaging and interesting to watch
-        - Maximum number of scenes is 8
+        - Maximum number of scenes is {max_scenes}
         Return only a single integer representing the optimal number of scenes. No explanation is needed.
         """
         
@@ -406,7 +415,7 @@ def generate_scene_metadata(script, model="gemini"):
                     'top_k': 40
                 }
             )
-            num_scenes = int(response.text.strip())
+            num_scenes = min(int(response.text.strip()), max_scenes)
             
         elif model == "claude":
             import anthropic
@@ -419,12 +428,12 @@ def generate_scene_metadata(script, model="gemini"):
                 system="You are an expert at analyzing scripts and determining optimal scene counts.",
                 messages=[{"role": "user", "content": f"{script}\n\n{prompt}"}]
             )
-            num_scenes = int(response.content[0].text.strip())
+            num_scenes = min(int(response.content[0].text.strip()), max_scenes)
         
         print(f"LLM determined optimal number of scenes: {num_scenes}")
         
         # Continue with existing scene generation logic using determined num_scenes
-        environments, env_path = generate_physical_environments(num_scenes, script, model)
+        environments, env_path = generate_physical_environments(num_scenes, script, model, max_environments=max_environments)
         metadata, metadata_path = generate_metadata_without_environment(num_scenes, script, model)
         final_metadata = combine_metadata_with_environment(num_scenes, script, metadata_path, env_path, model)
         
@@ -438,41 +447,63 @@ def generate_scene_metadata(script, model="gemini"):
                 pass
         raise e
 
-def generate_scenes(scenes, frame_generation_results):
+def generate_scenes(scenes, frame_generation_results, video_engine="luma", skip_sound_effects=False):
+    """
+    Generate video scenes with optional initial image input.
+    
+    Args:
+        scenes (list): List of scene metadata
+        frame_generation_results: Results from frame generation
+        video_engine (str): Video generation engine to use ('luma' or 'ltx')
+        skip_sound_effects (bool): Whether to skip sound effects generation
+    """
     scene_video_files = []  # List of video files
     sound_effect_files = []  # List of sound effect files
+    previous_last_frame_url = None  # Track last frame URL from previous scene
     
     for i, scene in enumerate(scenes):
         print(f"Generating videos for Scene {scene['scene_number']}")
-        scene_duration = scene['scene_duration']
         
-        # Validate scene duration
-        if scene_duration not in [5, 9]:
-            raise ValueError(f"Invalid scene duration: {scene_duration}. Must be either 5 or 9 seconds.")
+        # For LTX, we only support 5 second videos
+        if video_engine == "ltx":
+            scene_duration = LTX_VIDEO_GENERATION_DURATION
+        else:
+            scene_duration = scene['scene_duration']
+            # Validate scene duration for Luma
+            if scene_duration not in LUMA_VIDEO_GENERATION_DURATION_OPTIONS:
+                try:
+                    # choose one of the available duration options
+                    scene_duration = random.choice(LUMA_VIDEO_GENERATION_DURATION_OPTIONS)
+                except Exception as e:
+                    print(f"Error choosing scene duration: {e}")
+                    raise
         
         # Create scene-specific directory
         scene_dir = f"{video_dir}/scene_{scene['scene_number']}_vid_{timestamp}"
         os.makedirs(scene_dir, exist_ok=True)
         
-        # Generate sound effect
-        sound_effect_path = f"{scene_dir}/scene_{scene['scene_number']}_sound.mp3"
-        print(f"Generating sound effect for Scene {scene['scene_number']}")
-        try:
-            sound_effect_generator = elevenlabs_client.text_to_sound_effects.convert(
-                text=scene['sound_effects_prompt'],
-                duration_seconds=scene_duration,
-                prompt_influence=0.5
-            )
-            
-            with open(sound_effect_path, 'wb') as f:
-                for chunk in sound_effect_generator:
-                    if chunk is not None:
-                        f.write(chunk)
-            
-            sound_effect_files.append(sound_effect_path)
-            print(f"Sound effect saved to: {sound_effect_path}")
-        except Exception as e:
-            print(f"Failed to generate sound effect: {e}")
+        # Generate sound effect if not skipped
+        if not skip_sound_effects:
+            sound_effect_path = f"{scene_dir}/scene_{scene['scene_number']}_sound.mp3"
+            print(f"Generating sound effect for Scene {scene['scene_number']}")
+            try:
+                sound_effect_generator = elevenlabs_client.text_to_sound_effects.convert(
+                    text=scene['sound_effects_prompt'],
+                    duration_seconds=scene_duration,
+                    prompt_influence=0.5
+                )
+                
+                with open(sound_effect_path, 'wb') as f:
+                    for chunk in sound_effect_generator:
+                        if chunk is not None:
+                            f.write(chunk)
+                
+                sound_effect_files.append(sound_effect_path)
+                print(f"Sound effect saved to: {sound_effect_path}")
+            except Exception as e:
+                print(f"Failed to generate sound effect: {e}")
+                sound_effect_files.append(None)
+        else:
             sound_effect_files.append(None)
         
         # Construct video generation prompt
@@ -502,90 +533,119 @@ def generate_scenes(scenes, frame_generation_results):
             
         # Get image URLs from frame results
         first_frame_url = frame_data["first_frame_result"]["images"][0]["url"]
-        last_frame_url = frame_data["last_frame_result"]["images"][0]["url"]
+        current_last_frame_url = frame_data["last_frame_result"]["images"][0]["url"]
         
         # Generate single video for the scene
         video_path = f"{scene_dir}/scene_{scene['scene_number']}_{timestamp}.mp4"
-        
-        # Create video generation with LoRA-generated frames
-        generation_params = {
-            "prompt": video_prompt.strip(),
-            # "model": "ray-2",
-            # "resolution": "720p",
-            #"duration": f"{scene_duration}s",
-            "keyframes": {
-                "frame0": {
-                    "type": "image",
-                    "url": first_frame_url
-                },
-                "frame1": {
-                    "type": "image",
-                    "url": last_frame_url
-                }
-            }
-        }
         
         print("Generate video name: ", video_path)
         print("Generating video with prompt: ", video_prompt.strip())
         print("Video duration: ", scene_duration)
         print("First frame URL: ", first_frame_url)
-        print("Last frame URL: ", last_frame_url)
+        print("Last frame URL: ", current_last_frame_url)
         print()
-        generation = luma_client.generations.create(**generation_params)
-        
-        # Wait for completion
-        retry_count = 0
-        max_retries = 3
-        while retry_count < max_retries:
+
+        if video_engine == "ltx":
+            # Use LTX for video generation
             try:
-                while True:
-                    generation = luma_client.generations.get(id=generation.id)
-                    if generation.state == "completed":
-                        break
-                    elif generation.state == "failed":
-                        print(f"Generation state: {generation.state}")
-                        print(f"Generation ID: {generation.id}")
-                        print(f"Full generation object: {generation}")
-                        print(f"Failure reason: {generation.failure_reason}")
-                        raise RuntimeError(f"Generation failed: {generation.failure_reason}")
-                    elif generation.state == "error":
-                        print(f"Generation error state: {generation}")
-                        raise RuntimeError(f"Generation error: {generation}")
-                    print(f"Generation status: {generation.state}...")
-                    time.sleep(3)
-                break  # If we get here, generation was successful
-            except Exception as e:
-                retry_count += 1
-                if retry_count >= max_retries:
-                    print(f"Failed after {max_retries} attempts. Last error: {str(e)}")
-                    raise
-                print(f"Attempt {retry_count} failed: {str(e)}. Retrying...")
-                time.sleep(5)  # Wait before retrying
-        
-        # Download video
-        try:
-            print(f"Downloading video from: {generation.assets.video}")
-            response = requests.get(generation.assets.video, stream=True)
-            response.raise_for_status()  # Raise an error for bad status codes
-            
-            with open(video_path, 'wb') as file:
-                for chunk in response.iter_content(chunk_size=8192):
-                    if chunk:
-                        file.write(chunk)
-            
-            if not os.path.exists(video_path) or os.path.getsize(video_path) == 0:
-                raise RuntimeError(f"Video file is empty or not created: {video_path}")
+                # For first scene, use first frame URL
+                if i == 0:
+                    result = generate_ltx_video(
+                        prompt=video_prompt.strip(),
+                        image_url=first_frame_url,
+                        output_path=video_path
+                    )
+                else:
+                    # For subsequent scenes, use last frame from previous scene
+                    result = generate_ltx_video(
+                        prompt=video_prompt.strip(),
+                        image_url=previous_last_frame_url,  # Use previous scene's last frame
+                        output_path=video_path
+                    )
                 
-            print(f"Video downloaded successfully to: {video_path}")
-        except Exception as e:
-            print(f"Error downloading video: {str(e)}")
-            raise
-        
+                if not os.path.exists(video_path):
+                    raise RuntimeError("LTX video generation failed to save the video file")
+                    
+            except Exception as e:
+                print(f"Error generating video with LTX: {str(e)}")
+                raise
+        else:
+            # Use Luma for video generation
+            generation_params = {
+                "prompt": video_prompt.strip(),
+                # "model": "ray-2",
+                # "resolution": "720p",
+                # "duration": f"{scene_duration}s",
+                "keyframes": {
+                    "frame0": {
+                        "type": "image",
+                        "url": first_frame_url
+                    },
+                    "frame1": {
+                        "type": "image",
+                        "url": current_last_frame_url
+                    }
+                }
+            }
+            
+            generation = luma_client.generations.create(**generation_params)
+            
+            # Wait for completion
+            retry_count = 0
+            max_retries = 3
+            while retry_count < max_retries:
+                try:
+                    while True:
+                        generation = luma_client.generations.get(id=generation.id)
+                        if generation.state == "completed":
+                            break
+                        elif generation.state == "failed":
+                            print(f"Generation state: {generation.state}")
+                            print(f"Generation ID: {generation.id}")
+                            print(f"Full generation object: {generation}")
+                            print(f"Failure reason: {generation.failure_reason}")
+                            raise RuntimeError(f"Generation failed: {generation.failure_reason}")
+                        elif generation.state == "error":
+                            print(f"Generation error state: {generation}")
+                            raise RuntimeError(f"Generation error: {generation}")
+                        print(f"Generation status: {generation.state}...")
+                        time.sleep(3)
+                    break  # If we get here, generation was successful
+                except Exception as e:
+                    retry_count += 1
+                    if retry_count >= max_retries:
+                        print(f"Failed after {max_retries} attempts. Last error: {str(e)}")
+                        raise
+                    print(f"Attempt {retry_count} failed: {str(e)}. Retrying...")
+                    time.sleep(5)  # Wait before retrying
+            
+            # Download video
+            try:
+                print(f"Downloading video from: {generation.assets.video}")
+                response = requests.get(generation.assets.video, stream=True)
+                response.raise_for_status()  # Raise an error for bad status codes
+                
+                with open(video_path, 'wb') as file:
+                    for chunk in response.iter_content(chunk_size=8192):
+                        if chunk:
+                            file.write(chunk)
+                
+                if not os.path.exists(video_path) or os.path.getsize(video_path) == 0:
+                    raise RuntimeError(f"Video file is empty or not created: {video_path}")
+                    
+                print(f"Video downloaded successfully to: {video_path}")
+            except Exception as e:
+                print(f"Error downloading video: {str(e)}")
+                raise
+
         # Copy the video to the main directory
         final_video_path = f"{video_dir}/scene_{scene['scene_number']}_{timestamp}.mp4"
         import shutil
         shutil.copy2(video_path, final_video_path)
         scene_video_files.append(final_video_path)
+        
+        # Update previous_last_frame_url for next iteration
+        previous_last_frame_url = current_last_frame_url
         time.sleep(2)
     
     return scene_video_files, sound_effect_files
@@ -746,6 +806,8 @@ def main():
     parser = argparse.ArgumentParser(description='Generate a video based on script analysis')
     parser.add_argument('--model', type=str, choices=['gemini', 'claude'], default='gemini',
                        help='Model to use for scene generation (default: gemini)')
+    parser.add_argument('--video_engine', type=str, choices=['luma', 'ltx'], default='luma',
+                       help='Video generation engine to use (default: luma)')
     parser.add_argument('--metadata_only', action='store_true',
                        help='Only generate scene metadata JSON without video generation')
     parser.add_argument('--trained_lora_dir', type=str,
@@ -754,6 +816,12 @@ def main():
                        help='Only generate narration audio and exit')
     parser.add_argument('--skip_narration', action='store_true',
                        help='Skip narration generation and use existing audio')
+    parser.add_argument('--skip_sound_effects', action='store_true',
+                       help='Skip sound effects generation')
+    parser.add_argument('--max_scenes', type=int, default=8,
+                       help='Maximum number of scenes to generate (default: 8)')
+    parser.add_argument('--max_environments', type=int, default=3,
+                       help='Maximum number of unique environments to use (default: 3)')
     args = parser.parse_args()
 
     if args.trained_lora_dir:
@@ -791,8 +859,6 @@ def main():
             raise ValueError("LoRA results file is empty")
             
         print(f"Loaded {len(lora_results)} LoRA results")
-        for lr in lora_results:
-            print(f"LoRA {lr['environment_index']}: {lr['trigger_word']} -> {lr['lora_path']}")
         
         # Initialize LoRA manager and generate frames
         print("Generating frames using existing LoRAs...")
@@ -806,7 +872,12 @@ def main():
         print(f"Analyzing script and generating scene metadata using {args.model}...")
         with open('movie_script2.txt', 'r') as f:
             script = f.read()
-        scenes = generate_scene_metadata(script, args.model)
+        scenes = generate_scene_metadata(
+            script, 
+            model=args.model,
+            max_scenes=args.max_scenes,
+            max_environments=args.max_environments
+        )
         
         if args.metadata_only:
             print(f"Scene metadata JSON generated in: {video_dir}")
@@ -863,7 +934,12 @@ def main():
     
     # Generate videos and sound effects
     print("Generating videos and sound effects...")
-    video_files, sound_effect_files = generate_scenes(scenes, frame_results)
+    video_files, sound_effect_files = generate_scenes(
+        scenes, 
+        frame_results, 
+        args.video_engine,
+        skip_sound_effects=args.skip_sound_effects
+    )
     
     # Stitch videos with sound effects and narration
     print("Stitching videos together with sound effects and narration...")
