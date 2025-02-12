@@ -812,10 +812,8 @@ def main():
                        help='Only generate scene metadata JSON without video generation')
     parser.add_argument('--trained_lora_dir', type=str,
                        help='Directory containing previously trained LoRAs to use for frame generation')
-    parser.add_argument('--narration_only', action='store_true',
-                       help='Only generate narration audio and exit')
     parser.add_argument('--skip_narration', action='store_true',
-                       help='Skip narration generation and use existing audio')
+                       help='Skip narration generation')
     parser.add_argument('--skip_sound_effects', action='store_true',
                        help='Skip sound effects generation')
     parser.add_argument('--max_scenes', type=int, default=8,
@@ -908,29 +906,22 @@ def main():
         narration_text, narration_text_path = generate_narration_text(scenes, total_duration, args.model)
         print(f"Narration text saved to: {narration_text_path}")
         
-        if args.narration_only:
-            print("\nGenerating narration audio...")
-            narration_audio_path = generate_narration_for_video(narration_text, total_duration, video_dir)
-            if narration_audio_path:
-                print(f"Narration audio generated successfully: {narration_audio_path}")
-                # Save the path for future use
-                result = {
-                    "narration_audio_path": narration_audio_path,
-                    "timestamp": datetime.now().strftime("%Y%m%d_%H%M%S")
-                }
-                result_path = os.path.join(video_dir, "narration_result.json")
-                with open(result_path, 'w') as f:
-                    json.dump(result, f)
-            else:
-                print("Failed to generate narration audio")
-            return
+        print("\nGenerating narration audio...")
+        narration_audio_path = generate_narration_for_video(narration_text, total_duration, video_dir)
+        if narration_audio_path:
+            print(f"Narration audio generated successfully: {narration_audio_path}")
+            # Save the path for future use
+            result = {
+                "narration_audio_path": narration_audio_path,
+                "timestamp": datetime.now().strftime("%Y%m%d_%H%M%S")
+            }
+            result_path = os.path.join(video_dir, "narration_result.json")
+            with open(result_path, 'w') as f:
+                json.dump(result, f)
+        else:
+            print("Failed to generate narration audio")
     else:
-        # Check for existing narration audio
-        print("Checking for existing narration audio...")
-        narration_audio_path = get_narration_audio_path()
-        if not narration_audio_path:
-            print("No narration audio found. Please run the script with --narration_only first")
-            return
+        print("Skipping narration generation...")
     
     # Generate videos and sound effects
     print("Generating videos and sound effects...")
