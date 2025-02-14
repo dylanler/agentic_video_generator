@@ -1,6 +1,6 @@
-# Video Generation System
+# A Thousand Hands: AI Agentic Video Generation System with Scene Consistency
 
-A sophisticated Python application that transforms text scripts into complete video productions with synchronized audio, narration, and visual effects using Claude, Gemini, ElevenLabs, and LumaAI.
+An end-to-end application that transforms text scripts into complete video productions with synchronized audio, narration, and visual effects using Claude, Gemini, ElevenLabs, and LumaAI.
 
 ## Features
 
