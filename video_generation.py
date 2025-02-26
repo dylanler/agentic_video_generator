@@ -1,6 +1,7 @@
 import os
 import json
 import time
+import re
 from datetime import datetime
 from google import genai
 from lumaai import LumaAI
@@ -18,13 +19,15 @@ import shutil
 from dotenv import load_dotenv
 load_dotenv()
 from ltx_video_generation import generate_ltx_video
+# Import scan_directory module
+from scan_directory import scan_directory, get_remaining_scenes, get_completed_scene_videos, get_sound_effect_files
 
 # Initialize clients
 gemini_client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
 anthropic_api_key = os.getenv("ANTHROPIC_API_KEY")
 
 # Add video duration configuration
-LUMA_VIDEO_GENERATION_DURATION_OPTIONS = [5, 9, 14, 18]  # Duration in seconds
+LUMA_VIDEO_GENERATION_DURATION_OPTIONS = [5, 10, 15]  # Duration in seconds
 
 luma_client = LumaAI(auth_token=os.getenv("LUMAAI_API_KEY"))
 
@@ -170,7 +173,8 @@ def generate_metadata_without_environment(num_scenes, script, model="gemini", vi
        - Musical mood suggestions
     6. Take into account the previous scene's movement description, emotions, camera movement, and sound effects prompt when creating the next scene's movement description, emotions, camera movement, and sound effects prompt.
     7. The first scene should have no previous scene movement description, emotions, camera movement, and sound effects prompt, enter string "none".
-    8. Scene duration must be selected from these options: {LUMA_VIDEO_GENERATION_DURATION_OPTIONS if video_engine == "luma" else "[5]"} (in seconds)
+    8. Scene duration must be selected from these options: {LUMA_VIDEO_GENERATION_DURATION_OPTIONS if video_engine == "luma" else "[5, 10]"} (in seconds)
+    9. The artistic style of the video should be inferred from the movie script and it should be constant for every scene.
 
     Focus on creating a cohesive visual narrative without any dialogue.
     
@@ -184,10 +188,11 @@ def generate_metadata_without_environment(num_scenes, script, model="gemini", vi
         "scene_emotions": "string value",
         "previous_scene_camera_movement": "string value",
         "scene_camera_movement": "string value",
-        "previous_scene_duration": "integer value", # 5, 9, 14, or 18
-        "scene_duration": "integer value", # 5, 9, 14, or 18
+        "previous_scene_duration": "integer value", # 5, 10, 15
+        "scene_duration": "integer value", # 5, 10, 15
         "previous_scene_sound_effects_prompt": "string value",
-        "sound_effects_prompt": "string value"
+        "sound_effects_prompt": "string value",
+        "artistic_style": "string value"
     }}
     """
     
@@ -212,10 +217,11 @@ def generate_metadata_without_environment(num_scenes, script, model="gemini", vi
                                 'scene_emotions': {'type': 'string'},
                                 'scene_camera_movement': {'type': 'string'},
                                 'scene_duration': {'type': 'integer'},
-                                'sound_effects_prompt': {'type': 'string'}
+                                'sound_effects_prompt': {'type': 'string'},
+                                'artistic_style': {'type': 'string'}
                             },
                             'required': ['scene_number', 'scene_name', 'scene_movement_description', 
-                                       'scene_emotions', 'scene_camera_movement', 'scene_duration', 'sound_effects_prompt']
+                                       'scene_emotions', 'scene_camera_movement', 'scene_duration', 'sound_effects_prompt', 'artistic_style']
                         }
                     }
                 }
@@ -243,10 +249,11 @@ def generate_metadata_without_environment(num_scenes, script, model="gemini", vi
                         "scene_emotions": "string value",
                         "previous_scene_camera_movement": "string value",
                         "scene_camera_movement": "string value",
-                        "previous_scene_duration": "integer value", # 5, 9, or 14
-                        "scene_duration": "integer value", # 5, 9, or 14
+                        "previous_scene_duration": "integer value", # 5, 9, or 15
+                        "scene_duration": "integer value", # 5, 9, or 15
                         "previous_scene_sound_effects_prompt": "string value",
-                        "sound_effects_prompt": "string value"
+                        "sound_effects_prompt": "string value",
+                        "artistic_style": "string value"
                     },
                     ...
                 ]
@@ -322,11 +329,12 @@ def combine_metadata_with_environment(num_scenes, script, metadata_path, environ
                                 'scene_emotions': {'type': 'string'},
                                 'scene_camera_movement': {'type': 'string'},
                                 'scene_duration': {'type': 'integer'},
-                                'sound_effects_prompt': {'type': 'string'}
+                                'sound_effects_prompt': {'type': 'string'},
+                                'artistic_style': {'type': 'string'}
                             },
                             'required': ['scene_number', 'scene_name', 'scene_physical_environment',
                                        'scene_movement_description', 'scene_emotions',
-                                       'scene_camera_movement', 'scene_duration', 'sound_effects_prompt']
+                                       'scene_camera_movement', 'scene_duration', 'sound_effects_prompt', 'artistic_style']
                         }
                     }
                 }
@@ -351,7 +359,8 @@ def combine_metadata_with_environment(num_scenes, script, metadata_path, environ
                         "scene_emotions": "string value",
                         "scene_camera_movement": "string value",
                         "scene_duration": "integer value", # 5, 9, or 14
-                        "sound_effects_prompt": "string value"
+                        "sound_effects_prompt": "string value",
+                        "artistic_style": "string value"
                     },
                     ...
                 ]
@@ -400,7 +409,7 @@ def generate_scene_metadata(script, model="gemini", max_scenes=5, max_environmen
         prompt = f"""
         Analyze this movie script and determine the optimal number of scenes needed to tell the story effectively.
         Consider that:
-        - Each scene is {LUMA_VIDEO_GENERATION_DURATION_OPTIONS if video_engine == "luma" else "[5]"} seconds long
+        - Each scene is {LUMA_VIDEO_GENERATION_DURATION_OPTIONS if video_engine == "luma" else "[5, 10]"} seconds long
         - Scenes should maintain visual continuity
         - The story should flow naturally
         - Complex actions may need multiple scenes
@@ -460,7 +469,7 @@ def generate_scene_metadata(script, model="gemini", max_scenes=5, max_environmen
                 pass
         raise e
 
-def generate_scenes(scenes, video_engine="luma", skip_sound_effects=False, initial_image_path=None, initial_image_prompt=None):
+def generate_scenes(scenes, video_engine="luma", skip_sound_effects=False, initial_image_path=None, initial_image_prompt=None, first_frame_image_gen=False):
     """
     Generate video scenes with optional initial image input.
     
@@ -470,6 +479,7 @@ def generate_scenes(scenes, video_engine="luma", skip_sound_effects=False, initi
         skip_sound_effects (bool): Whether to skip sound effects generation
         initial_image_path (str): Path to local image to use as starting frame
         initial_image_prompt (str): Prompt to generate initial image using Luma AI
+        first_frame_image_gen (bool): Whether to generate first frame images for each scene
     """
     scene_video_files = []  # List of lists, each inner list contains videos for one scene
     sound_effect_files = []
@@ -516,19 +526,24 @@ def generate_scenes(scenes, video_engine="luma", skip_sound_effects=False, initi
         scene_dir = f"{video_dir}/scene_{scene['scene_number']}_all_vid_{timestamp}"
         os.makedirs(scene_dir, exist_ok=True)
         
-        # For LTX, we only support 5 second videos
+        # For LTX, we support 5, 10 second videos
         if video_engine == "ltx":
-            scene_duration = 5
-            video_durations = [5]
+            if scene['scene_duration'] == 5:
+                video_durations = [5]
+            elif scene['scene_duration'] == 10:
+                video_durations = [5, 5]
+            else:
+                raise ValueError(f"Invalid scene duration: {scene['scene_duration']}")
+
         else:
             scene_duration = scene['scene_duration']
             # Determine video durations based on scene duration
-            if scene_duration == 5 or scene_duration == 9:
+            if scene_duration == 5:
                 video_durations = [scene_duration]
-            elif scene_duration == 14:
-                video_durations = [5, 9]
-            elif scene_duration == 18:
-                video_durations = [9, 9]
+            elif scene_duration == 10:
+                video_durations = [5, 5]
+            elif scene_duration == 15:
+                video_durations = [5, 5, 5]
             else:
                 raise ValueError(f"Invalid scene duration: {scene_duration}")
         
@@ -570,7 +585,34 @@ def generate_scenes(scenes, video_engine="luma", skip_sound_effects=False, initi
         
         Camera Instructions:
         {scene['scene_camera_movement']}
+
+        Artistic Style:
+        {scene['artistic_style']}
         """
+        
+        # Generate first frame image for this scene if first_frame_image_gen is enabled
+        scene_first_frame_url = None
+        if first_frame_image_gen:
+            print(f"Generating first frame image for Scene {scene['scene_number']}")
+            from luma_image_gen import generate_image
+            try:
+                # Create a directory for the scene's first frame
+                first_frame_dir = f"{scene_dir}/first_frame"
+                os.makedirs(first_frame_dir, exist_ok=True)
+                
+                # Generate image using the same prompt as the video
+                image_url, image_path = generate_image(video_prompt.strip(), first_frame_dir)
+                
+                if image_url and image_path:
+                    # Assign the image URL to the scene_first_frame_url variable
+                    scene_first_frame_url = image_url
+                    print(f"Generated first frame image for Scene {scene['scene_number']}")
+                    print(f"Image URL: {scene_first_frame_url}")
+                    print(f"Image saved to: {image_path}")
+                else:
+                    print(f"Warning: Failed to generate first frame image for Scene {scene['scene_number']}")
+            except Exception as e:
+                print(f"Warning: Failed to generate first frame image: {str(e)}")
         
         # Generate each video segment for the scene
         segment_last_frame_url = None  # Track last frame URL within the scene
@@ -593,10 +635,16 @@ def generate_scenes(scenes, video_engine="luma", skip_sound_effects=False, initi
                     "prompt": video_prompt.strip(),
                     "output_path": video_path
                 }
-                if vid_idx == 1 and i == 0 and first_frame_of_first_scene_url:
+                # Use scene's first frame image if it's the first video segment and first_frame_image_gen is enabled
+                if vid_idx == 1 and scene_first_frame_url:
+                    ltx_args["image_url"] = scene_first_frame_url
+                # Otherwise use first frame of first scene for first scene only
+                elif vid_idx == 1 and i == 0 and first_frame_of_first_scene_url:
                     ltx_args["image_url"] = first_frame_of_first_scene_url
-                elif vid_idx == 1 and i > 0 and last_frame_url:
+                # Use last frame from previous scene for first video of subsequent scenes
+                elif vid_idx == 1 and i > 0 and last_frame_url and not scene_first_frame_url:
                     ltx_args["image_url"] = last_frame_url
+                # Use last frame from previous video in the same scene
                 elif vid_idx > 1 and segment_last_frame_url:
                     ltx_args["image_url"] = segment_last_frame_url
                 
@@ -614,16 +662,25 @@ def generate_scenes(scenes, video_engine="luma", skip_sound_effects=False, initi
                     "resolution": "720p",
                     "duration": f"{duration}s"
                 }
-                # Use initialized image for first video of first scene
-                if vid_idx == 1 and i == 0 and first_frame_of_first_scene_url:
+                
+                # Use scene's first frame image if it's the first video segment and first_frame_image_gen is enabled
+                if vid_idx == 1 and scene_first_frame_url:
+                    generation_params["keyframes"] = {
+                        "frame0": {
+                            "type": "image",
+                            "url": scene_first_frame_url
+                        }
+                    }
+                # Otherwise use first frame of first scene for first scene only
+                elif vid_idx == 1 and i == 0 and first_frame_of_first_scene_url:
                     generation_params["keyframes"] = {
                         "frame0": {
                             "type": "image",
                             "url": first_frame_of_first_scene_url
                         }
                     }
-                # Use last frame from previous scene for first video
-                elif vid_idx == 1 and i > 0 and last_frame_url:
+                # Use last frame from previous scene for first video of subsequent scenes
+                elif vid_idx == 1 and i > 0 and last_frame_url and not scene_first_frame_url:
                     generation_params["keyframes"] = {
                         "frame0": {
                             "type": "image",
@@ -917,15 +974,119 @@ def generate_video(
     skip_narration=False,
     skip_sound_effects=False,
     initial_image_path=None,
-    initial_image_prompt=None
+    initial_image_prompt=None,
+    first_frame_image_gen=False,
+    continue_from_dir=None
 ):
+    global video_dir, timestamp
+    
     try:
         if initial_image_path and initial_image_prompt:
             raise ValueError("Cannot provide both initial_image_path and initial_image_prompt. Please choose one.")
             
-        if initial_image_prompt and not os.getenv("LUMAAI_API_KEY"):
+        if (initial_image_prompt or first_frame_image_gen) and not os.getenv("LUMAAI_API_KEY"):
             raise ValueError("Luma AI API key is required for image generation.")
-
+        
+        # If continuing from a previous directory
+        if continue_from_dir:
+            print(f"Continuing video generation from directory: {continue_from_dir}")
+            scan_result = scan_directory(continue_from_dir)
+            
+            # Use the existing directory and timestamp
+            video_dir = continue_from_dir
+            if scan_result["timestamp"]:
+                timestamp = scan_result["timestamp"]
+            
+            # Check if we have scene data
+            if not scan_result["scenes_data"]:
+                raise ValueError("No scene data found in the specified directory")
+            
+            scenes = scan_result["scenes_data"]
+            print(f"Found {len(scenes)} scenes in total")
+            print(f"Completed scenes: {scan_result['completed_scenes']}")
+            print(f"Incomplete scenes: {scan_result['incomplete_scenes']}")
+            
+            # If all scenes are completed, just stitch the videos
+            if not scan_result["incomplete_scenes"]:
+                print("All scenes are already generated. Proceeding to stitch videos.")
+                video_files = get_completed_scene_videos(scan_result)
+                sound_effect_files = get_sound_effect_files(scan_result)
+                
+                # Check if narration exists or needs to be generated
+                narration_audio_path = scan_result["narration_audio_path"]
+                if not narration_audio_path and not skip_narration:
+                    # Generate narration if it doesn't exist
+                    total_duration = calculate_total_duration(scenes)
+                    narration_text, narration_text_path = generate_narration_text(scenes, total_duration, model_choice)
+                    narration_audio_path = generate_narration_audio(narration_text, total_duration)
+                
+                # Stitch videos with sound effects and narration
+                final_video = stitch_videos(video_files, sound_effect_files, narration_audio_path)
+                return json.dumps(scenes, indent=2), final_video
+            
+            # Get remaining scenes to generate
+            remaining_scenes = get_remaining_scenes(scan_result)
+            
+            # Generate remaining scenes
+            print(f"Generating {len(remaining_scenes)} remaining scenes...")
+            remaining_video_files, remaining_sound_effect_files = generate_scenes(
+                remaining_scenes, 
+                video_engine, 
+                skip_sound_effects,
+                initial_image_path=initial_image_path,
+                initial_image_prompt=initial_image_prompt,
+                first_frame_image_gen=first_frame_image_gen
+            )
+            
+            # Get completed scene videos and sound effects
+            completed_video_files = get_completed_scene_videos(scan_result)
+            completed_sound_effect_files = get_sound_effect_files(scan_result)
+            
+            # Combine completed and newly generated videos
+            all_video_files = []
+            all_sound_effect_files = []
+            
+            # Create a mapping of scene number to video file
+            scene_to_video = {}
+            for video_file in completed_video_files + remaining_video_files:
+                scene_match = re.search(r'scene_(\d+)_', os.path.basename(video_file))
+                if scene_match:
+                    scene_number = int(scene_match.group(1))
+                    scene_to_video[scene_number] = video_file
+            
+            # Create a mapping of scene number to sound effect file
+            scene_to_sound = {}
+            for i, scene_number in enumerate(scan_result["completed_scenes"]):
+                if i < len(completed_sound_effect_files):
+                    scene_to_sound[scene_number] = completed_sound_effect_files[i]
+            
+            # Add newly generated sound effects
+            for i, scene in enumerate(remaining_scenes):
+                scene_number = scene["scene_number"]
+                if i < len(remaining_sound_effect_files):
+                    scene_to_sound[scene_number] = remaining_sound_effect_files[i]
+            
+            # Order videos and sound effects by scene number
+            for scene in scenes:
+                scene_number = scene["scene_number"]
+                if scene_number in scene_to_video:
+                    all_video_files.append(scene_to_video[scene_number])
+                    all_sound_effect_files.append(scene_to_sound.get(scene_number))
+            
+            # Check if narration exists or needs to be generated
+            narration_audio_path = scan_result["narration_audio_path"]
+            if not narration_audio_path and not skip_narration:
+                # Generate narration if it doesn't exist
+                total_duration = calculate_total_duration(scenes)
+                narration_text, narration_text_path = generate_narration_text(scenes, total_duration, model_choice)
+                narration_audio_path = generate_narration_audio(narration_text, total_duration)
+            
+            # Stitch videos with sound effects and narration
+            final_video = stitch_videos(all_video_files, all_sound_effect_files, narration_audio_path)
+            
+            return json.dumps(scenes, indent=2), final_video
+        
+        # Normal flow (not continuing from a previous directory)
         # Generate scene metadata with custom parameters
         scenes = generate_scene_metadata(
             script_text, 
@@ -955,7 +1116,8 @@ def generate_video(
             video_engine, 
             skip_sound_effects,
             initial_image_path=initial_image_path,
-            initial_image_prompt=initial_image_prompt
+            initial_image_prompt=initial_image_prompt,
+            first_frame_image_gen=first_frame_image_gen
         )
         
         # Stitch videos with sound effects and narration
@@ -987,16 +1149,47 @@ def main():
                        help='Path to local image to use as starting frame for the first video')
     parser.add_argument('--initial_image_prompt', type=str,
                        help='Prompt to generate initial image using Luma AI for the first video')
+    parser.add_argument('--first_frame_image_gen', action='store_true',
+                       help='Generate first frame images for each scene using Luma AI')
+    parser.add_argument('--continue_from_dir', type=str,
+                       help='Continue video generation from a previously interrupted process in the specified directory')
     args = parser.parse_args()
 
     if args.initial_image_path and args.initial_image_prompt:
         print("Error: Cannot provide both initial_image_path and initial_image_prompt. Please choose one.")
         return
         
-    if args.initial_image_prompt and not os.getenv("LUMAAI_API_KEY"):
+    if (args.initial_image_prompt or args.first_frame_image_gen) and not os.getenv("LUMAAI_API_KEY"):
         print("Error: Luma AI API key is required for image generation.")
         return
 
+    # If continuing from a previous directory
+    if args.continue_from_dir:
+        if not os.path.exists(args.continue_from_dir):
+            print(f"Error: Directory '{args.continue_from_dir}' does not exist")
+            return
+        
+        print(f"Continuing video generation from directory: {args.continue_from_dir}")
+        scenes_json, final_video = generate_video(
+            "", # Empty script text since we're using existing metadata
+            model_choice=args.model,
+            video_engine=args.video_engine,
+            metadata_only=args.metadata_only,
+            max_scenes=args.max_scenes,
+            max_environments=args.max_environments,
+            skip_narration=args.skip_narration,
+            skip_sound_effects=args.skip_sound_effects,
+            initial_image_path=args.initial_image_path,
+            initial_image_prompt=args.initial_image_prompt,
+            first_frame_image_gen=args.first_frame_image_gen,
+            continue_from_dir=args.continue_from_dir
+        )
+        
+        if final_video:
+            print(f"Final video saved to: {final_video}")
+        return
+
+    # Normal flow (not continuing from a previous directory)
     # Generate scene metadata with LLM-determined number of scenes
     print(f"Analyzing script and generating scene metadata using {args.model}...")
     try:
@@ -1009,48 +1202,26 @@ def main():
         print(f"Error reading script file: {str(e)}")
         return
 
-    scenes = generate_scene_metadata(
+    scenes_json, final_video = generate_video(
         script, 
-        model=args.model,
+        model_choice=args.model,
+        video_engine=args.video_engine,
+        metadata_only=args.metadata_only,
         max_scenes=args.max_scenes,
         max_environments=args.max_environments,
-        video_engine=args.video_engine
-    )
-    
-    if args.metadata_only:
-        print(f"Scene metadata JSON generated in: {video_dir}")
-        return
-
-    # Generate narration text and audio if not skipped
-    narration_audio_path = None
-    if not args.skip_narration:
-        # Calculate total duration only if needed for narration
-        total_duration = calculate_total_duration(scenes)
-        print(f"Total video duration: {total_duration} seconds")
-        
-        print("Generating narration text...")
-        narration_text, narration_text_path = generate_narration_text(scenes, total_duration, args.model)
-        
-        print("Generating narration audio...")
-        narration_audio_path = generate_narration_audio(narration_text, total_duration)
-    else:
-        print("Skipping narration generation...")
-
-    # Generate videos and sound effects
-    print("Generating videos and sound effects...")
-    video_files, sound_effect_files = generate_scenes(
-        scenes, 
-        args.video_engine, 
-        args.skip_sound_effects,
+        skip_narration=args.skip_narration,
+        skip_sound_effects=args.skip_sound_effects,
         initial_image_path=args.initial_image_path,
-        initial_image_prompt=args.initial_image_prompt
+        initial_image_prompt=args.initial_image_prompt,
+        first_frame_image_gen=args.first_frame_image_gen
     )
     
-    # Stitch videos with sound effects and narration
-    print("Stitching videos together with sound effects and narration...")
-    final_video = stitch_videos(video_files, sound_effect_files, narration_audio_path)
-    
-    print(f"Final video saved to: {final_video}")
+    if isinstance(scenes_json, str) and not final_video:
+        print(f"Error: {scenes_json}")
+    elif args.metadata_only:
+        print(f"Scene metadata JSON generated in: {video_dir}")
+    elif final_video:
+        print(f"Final video saved to: {final_video}")
 
 if __name__ == "__main__":
     main()
