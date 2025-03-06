@@ -122,9 +122,9 @@ def generate_ltx_video(
     # Add image URL if provided
     if image_url:
         arguments["image_url"] = image_url
-        model_endpoint = "fal-ai/ltx-video/image-to-video"
+        model_endpoint = "fal-ai/ltx-video-v095/image-to-video"
     else:
-        model_endpoint = "fal-ai/ltx-video"
+        model_endpoint = "fal-ai/ltx-video-v095"
     
     # Add any additional model arguments
     if model_args:
