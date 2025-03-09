@@ -51,6 +51,7 @@ import requests
 from pathlib import Path
 from dotenv import load_dotenv
 from typing import Optional, Union, Dict, Any
+import json
 
 # Load environment variables
 load_dotenv()
@@ -152,7 +153,17 @@ def generate_ltx_video(
         if output_path:
             saved_path = download_video(video_url, output_path)
             result['saved_path'] = saved_path
+            result['local_video_path'] = os.path.abspath(saved_path)
             print(f"Video saved to: {saved_path}")
+            
+            # Optionally save the JSON response alongside the video
+            json_path = f"{os.path.splitext(output_path)[0]}_response.json"
+            try:
+                with open(json_path, 'w') as json_file:
+                    json.dump(result, json_file, indent=2)
+                print(f"Response JSON saved to: {json_path}")
+            except Exception as e:
+                print(f"Warning: Failed to save response JSON: {str(e)}")
         
         print(f"Video URL: {video_url}")
         print(f"Video file name: {result.get('video', {}).get('file_name')}")

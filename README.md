@@ -14,6 +14,7 @@ An end-to-end application that transforms text scripts into complete video produ
 - User-friendly Gradio web interface
 - Initial frame customization (via upload or Luma AI generation)
 - Support for custom starting frames with LTX engine
+- Random script generation with customizable elements
 - Flexible video initialization options:
   - Upload local images as starting frames
   - Generate initial frames using Luma AI prompts
@@ -283,7 +284,10 @@ python video_generation_app.py
    - If you do not have the API keys, you can enter "none" and the app will choose the default keys
 
 4. In the "Video Generation" tab:
-   - Enter your movie script
+   - Enter your movie script or use the random script generation feature:
+     - Check "Generate Random Script" to use a randomly generated script
+     - Click "Preview Random Script" to see what will be generated before creating a video
+     - The random script will use the selected model (Gemini or Claude)
    - Choose the model (Gemini or Claude)
    - Select video engine (Luma or LTX)
    - Optional settings:
@@ -345,9 +349,16 @@ python video_generation.py --model gemini --skip_narration --skip_sound_effects
 
 # Use LTX engine without narration
 python video_generation.py --model gemini --video_engine ltx --skip_narration
-```
 
-The script file should be a text file containing your movie script. If no script file is specified, it will look for a default `movie_script2.txt` in the current directory.
+# Generate a random script and use it for video generation
+python video_generation.py --model gemini --random_script
+
+# Generate a random script separately
+python random_script_generator.py --model gemini
+
+# Generate a random script and immediately use it for video generation
+python random_script_generator.py --model gemini --video_gen --video_engine luma
+```
 
 ### Command Line Arguments
 
@@ -355,10 +366,25 @@ The script file should be a text file containing your movie script. If no script
 - `--video_engine`: Choose between 'luma' or 'ltx' for video generation (default: luma)
 - `--metadata_only`: Generate only scene metadata without video
 - `--script_file`: Path to your movie script file
+- `--random_script`: Generate a random script instead of using a script file
 - `--skip_narration`: Skip generating narration audio
 - `--skip_sound_effects`: Skip generating sound effects
 - `--max_scenes`: Maximum number of scenes to generate (default: 5)
 - `--max_environments`: Maximum number of unique environments to use (default: 3)
+
+For random script generation:
+```bash
+python random_script_generator.py --help
+```
+
+- `--model`: Choose between 'gemini' or 'claude' for script generation (default: gemini)
+- `--output`: Output file for the generated script (default: random_script.txt)
+- `--video_gen`: Generate a video using the random script
+- `--video_engine`: Choose between 'luma' or 'ltx' for video generation (default: luma)
+- `--max_scenes`: Maximum number of scenes to generate (default: 5)
+- `--max_environments`: Maximum number of environments to use (default: 3)
+- `--skip_narration`: Skip narration generation
+- `--skip_sound_effects`: Skip sound effects generation
 
 ## Generation Process
 

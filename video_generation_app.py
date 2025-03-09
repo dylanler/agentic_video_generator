@@ -5,6 +5,7 @@ from video_generation import generate_scene_metadata, generate_scenes, stitch_vi
 from dotenv import load_dotenv
 import tempfile
 import shutil
+from datetime import datetime
 
 def save_api_keys(gemini_key, eleven_labs_key, lumaai_key, anthropic_key, fal_key, bucket_name, credentials_file_obj):
     try:
@@ -168,6 +169,15 @@ Upload your Google Cloud service account credentials JSON file. You can create o
                     lines=10, 
                     placeholder="Enter your movie script here..."
                 )
+                
+                with gr.Row():
+                    use_random_script = gr.Checkbox(
+                        label="Generate Random Script",
+                        value=False,
+                        info="Generate a random script using the selected model instead of using the script above"
+                    )
+                    random_script_btn = gr.Button("Preview Random Script")
+                
                 model_choice = gr.Radio(
                     choices=["gemini", "claude"], 
                     label="Model Choice", 
@@ -272,7 +282,8 @@ Upload your Google Cloud service account credentials JSON file. You can create o
             skip_narration, 
             skip_sound_effects,
             initial_image_path,
-            initial_image_prompt
+            initial_image_prompt,
+            use_random_script
         ):
             if initial_image_path and initial_image_prompt:
                 return {
@@ -286,7 +297,109 @@ Upload your Google Cloud service account credentials JSON file. You can create o
                     video_output: None
                 }
                 
-            metadata, video = generate_video(
+            # Generate random script if requested
+            if use_random_script:
+                try:
+                    import random_script_generator
+                    script_data = random_script_generator.generate_random_script(model_choice)
+                    script = script_data["script"]
+                    
+                    # Display the generated script in the script input box
+                    script_input = script
+                    
+                    # Create a message to show the user that a random script was generated
+                    random_script_info = f"Using randomly generated script with model: {model_choice}\n\n"
+                    random_script_info += f"Elements used:\n"
+                    random_script_info += f"- Characters: {', '.join(script_data['elements']['characters'])}\n"
+                    random_script_info += f"- Objects: {', '.join(script_data['elements']['objects'])}\n"
+                    random_script_info += f"- Environment: {script_data['elements']['environment']}\n"
+                    random_script_info += f"- Atmosphere: {script_data['elements']['atmosphere']}\n"
+                    random_script_info += f"- Storyline: {script_data['elements']['storyline']}\n"
+                    random_script_info += f"- Artistic Style: {script_data['elements']['artistic_style']}\n\n"
+                    
+                    # Save the script to a file in the current directory
+                    script_file_path = f"random_script_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
+                    elements_file_path = f"random_script_elements_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+                    
+                    with open(script_file_path, "w") as f:
+                        f.write(script)
+                    
+                    with open(elements_file_path, "w") as f:
+                        json.dump(script_data["elements"], f, indent=2)
+                    
+                    print(f"Random script generated and saved to: {script_file_path}")
+                    print(f"Script elements saved to: {elements_file_path}")
+                except Exception as e:
+                    return {
+                        metadata_output: f"Error generating random script: {str(e)}",
+                        video_output: None
+                    }
+            else:
+                script = script_input
+                random_script_info = ""
+            
+            # Generate video
+            try:
+                scenes_json, final_video = generate_video(
+                    script, 
+                    model_choice=model_choice,
+                    video_engine=video_engine,
+                    metadata_only=metadata_only,
+                    max_scenes=max_scenes,
+                    max_environments=max_environments,
+                    custom_env_prompt=custom_env_prompt,
+                    custom_environments_file=custom_environments_file,
+                    skip_narration=skip_narration,
+                    skip_sound_effects=skip_sound_effects,
+                    initial_image_path=initial_image_path,
+                    initial_image_prompt=initial_image_prompt
+                )
+                
+                if random_script_info and not metadata_only:
+                    scenes_json = random_script_info + scenes_json
+                
+                return {
+                    metadata_output: scenes_json,
+                    video_output: final_video
+                }
+            except Exception as e:
+                return {
+                    metadata_output: f"Error: {str(e)}",
+                    video_output: None
+                }
+        
+        def preview_random_script(model_choice):
+            try:
+                import random_script_generator
+                script_data = random_script_generator.generate_random_script(model_choice)
+                script = script_data["script"]
+                
+                # Create a message with the script and its elements
+                preview_text = f"Randomly generated script with model: {model_choice}\n\n"
+                preview_text += f"Elements used:\n"
+                preview_text += f"- Characters: {', '.join(script_data['elements']['characters'])}\n"
+                preview_text += f"- Objects: {', '.join(script_data['elements']['objects'])}\n"
+                preview_text += f"- Environment: {script_data['elements']['environment']}\n"
+                preview_text += f"- Atmosphere: {script_data['elements']['atmosphere']}\n"
+                preview_text += f"- Storyline: {script_data['elements']['storyline']}\n"
+                preview_text += f"- Artistic Style: {script_data['elements']['artistic_style']}\n\n"
+                preview_text += f"Script:\n{'-' * 40}\n{script}\n{'-' * 40}"
+                
+                return script, preview_text
+            except Exception as e:
+                return "", f"Error generating random script: {str(e)}"
+        
+        # Connect the random script preview button
+        random_script_btn.click(
+            preview_random_script,
+            inputs=[model_choice],
+            outputs=[script_input, metadata_output]
+        )
+        
+        # Connect the generate button
+        generate_btn.click(
+            generate_and_show_progress,
+            inputs=[
                 script_input, 
                 model_choice, 
                 video_engine, 
@@ -298,29 +411,8 @@ Upload your Google Cloud service account credentials JSON file. You can create o
                 skip_narration, 
                 skip_sound_effects,
                 initial_image_path,
-                initial_image_prompt
-            )
-            # Return results immediately as they're generated
-            return {
-                metadata_output: metadata,
-                video_output: video
-            }
-
-        generate_btn.click(
-            generate_and_show_progress,
-            inputs=[
-                script_input,
-                model_choice,
-                video_engine,
-                metadata_only,
-                max_scenes,
-                max_environments,
-                custom_env_prompt,
-                custom_environments_file,
-                skip_narration,
-                skip_sound_effects,
-                initial_image_path,
-                initial_image_prompt
+                initial_image_prompt,
+                use_random_script
             ],
             outputs=[metadata_output, video_output]
         )

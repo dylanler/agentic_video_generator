@@ -56,8 +56,8 @@ def generate_physical_environments(num_scenes, script, max_environments=3, model
     - Lighting conditions
     - Weather and atmospheric conditions
     - Time of day
-    - Key objects and elements in the scene
-    - Maximum number of physical environments is {max_environments}
+    - Key objects and elements in the scene 
+    - The number of physical environments should be {max_environments}
     
     Some scenes will reuse the same physical environment. Across multiple scenes, the physical environment should maintain the same physical environment across two or more scenes.
     Focus on creating a cohesive visual narrative with the physical environment descriptions.
@@ -148,35 +148,57 @@ def generate_physical_environments(num_scenes, script, max_environments=3, model
 
 def generate_metadata_without_environment(num_scenes, script, model="gemini", video_engine="luma"):
     prompt = f"""
-    Create a JSON array of {num_scenes} detailed scene descriptions based on the movie script. Each scene should include:
-    1. A descriptive scene name that captures the essence of the moment
-    2. Movement descriptions including:
-       - Character movements and actions
-       - Character appereances should be described in detail along with ethnicity, gender, age, clothing, style, and any other relevant details
-       - Character appearances should be consistent with the previous scene's character appearances
-       - Object interactions and dynamics
-       - Flow of action
-    3. Emotional components including:
-       - Scene mood and atmosphere
-       - Emotional undertones
-       - Visual emotional cues
-    4. Camera movement specifications including:
-       - Shot types (wide, medium, close-up)
-       - Camera angles
-       - Movement patterns (pan, tilt, dolly, etc.)
-       - Camera movement should be smooth and fluid and not jarring
-       - If a scene does not require camera movement, enter camera movement as "static"
-    5. Sound effects focusing on:
-       - Environmental sounds
-       - Action-related sounds
-       - Ambient atmosphere
-       - Musical mood suggestions
-    6. Take into account the previous scene's movement description, emotions, camera movement, and sound effects prompt when creating the next scene's movement description, emotions, camera movement, and sound effects prompt.
-    7. The first scene should have no previous scene movement description, emotions, camera movement, and sound effects prompt, enter string "none".
-    8. Scene duration must be selected from these options: {LUMA_VIDEO_GENERATION_DURATION_OPTIONS if video_engine == "luma" else "[5, 10]"} (in seconds)
-    9. The artistic style of the video should be inferred from the movie script and it should be constant for every scene.
+    Create a detailed visual storyboard for {num_scenes} scenes based on the movie script. For each scene, describe:
 
-    Focus on creating a cohesive visual narrative without any dialogue.
+    1. Scene Name: Give each scene a descriptive title that captures its essence and mood.
+    
+    2. Character Movement and Appearance:
+       - Describe natural, fluid movements and actions of characters
+       - Include detailed character appearances with ethnicity, gender, age, clothing style
+       - Maintain consistent character appearances across scenes
+       - Show how characters interact with objects and their environment
+    
+    3. Emotional Atmosphere:
+       - Describe the mood, tone, and emotional feeling of the scene
+       - Include visual cues that convey the emotional state (lighting, colors, composition)
+       - Specify the atmosphere that surrounds the characters and setting
+    
+    4. Camera Direction:
+       - Choose ONLY from these specific camera movements:
+         * Static (no movement)
+         * Move Left
+         * Move Right
+         * Move Up
+         * Move Down
+         * Push In
+         * Pull Out
+         * Zoom In
+         * Zoom Out
+         * Pan Left
+         * Pan Right
+         * Orbit Left
+         * Orbit Right
+         * Crane Up
+         * Crane Down
+       - Also specify shot types (wide shot, medium shot, close-up)
+       - Ensure camera movements feel smooth and cinematic
+    
+    5. Sound Design:
+       - Describe environmental sounds that enhance the scene
+       - Suggest ambient audio elements that match the mood
+       - Include action-related sound effects
+       - Recommend musical tone or style that complements the scene
+    
+    6. Scene Continuity:
+       - Each scene should flow naturally from the previous one
+       - For the first scene, mark previous elements as "none"
+       - For subsequent scenes, consider how they connect to earlier scenes
+    
+    7. Scene Duration: Choose from these options: {LUMA_VIDEO_GENERATION_DURATION_OPTIONS if video_engine == "luma" else "[5, 10]"} seconds
+    
+    8. Artistic Style: Suggest a consistent visual style that should be maintained across all scenes
+
+    Focus on creating a cohesive visual narrative without dialogue, using natural, descriptive language.
     
     Return: array of objects with format:
     {{
@@ -188,8 +210,8 @@ def generate_metadata_without_environment(num_scenes, script, model="gemini", vi
         "scene_emotions": "string value",
         "previous_scene_camera_movement": "string value",
         "scene_camera_movement": "string value",
-        "previous_scene_duration": "integer value", # 5, 10, 15
-        "scene_duration": "integer value", # 5, 10, 15
+        "previous_scene_duration": "integer value", # based on scene duration specified
+        "scene_duration": "integer value", # based on scene duration specified
         "previous_scene_sound_effects_prompt": "string value",
         "sound_effects_prompt": "string value",
         "artistic_style": "string value"
@@ -249,8 +271,8 @@ def generate_metadata_without_environment(num_scenes, script, model="gemini", vi
                         "scene_emotions": "string value",
                         "previous_scene_camera_movement": "string value",
                         "scene_camera_movement": "string value",
-                        "previous_scene_duration": "integer value", # 5, 9, or 15
-                        "scene_duration": "integer value", # 5, 9, or 15
+                        "previous_scene_duration": "integer value", # based on scene duration specified
+                        "scene_duration": "integer value", # based on scene duration specified
                         "previous_scene_sound_effects_prompt": "string value",
                         "sound_effects_prompt": "string value",
                         "artistic_style": "string value"
@@ -414,7 +436,7 @@ def generate_scene_metadata(script, model="gemini", max_scenes=5, max_environmen
         - The story should flow naturally
         - Complex actions may need multiple scenes
         - The story should be told in a way that is engaging and interesting to watch
-        - Maximum number of scenes is {max_scenes}
+        - The number of scenes should be {max_scenes}
         - Scene should not have racist, sexist elements
         - Scene should be artistically pleasing and creative
         Return only a single integer representing the optimal number of scenes. No explanation is needed.
@@ -437,8 +459,8 @@ def generate_scene_metadata(script, model="gemini", max_scenes=5, max_environmen
             client = anthropic.Anthropic(api_key=anthropic_api_key)
             
             response = client.messages.create(
-                model="claude-3-5-sonnet-20241022",
-                max_tokens=100,
+                model="claude-3-7-sonnet-latest",
+                max_tokens=1048,
                 temperature=0.7,
                 system="You are an expert at analyzing scripts and determining optimal scene counts.",
                 messages=[{"role": "user", "content": f"{script}\n\n{prompt}"}]
@@ -652,6 +674,15 @@ def generate_scenes(scenes, video_engine="luma", skip_sound_effects=False, initi
                     result = generate_ltx_video(**ltx_args)
                     if not os.path.exists(video_path):
                         raise RuntimeError("LTX video generation failed to save the video file")
+                    
+                    # Save the LTX response JSON to the video directory
+                    ltx_json_path = f"{os.path.splitext(video_path)[0]}_ltx_response_{timestamp}.json"
+                    # Add the local path to the result
+                    result['local_video_path'] = os.path.abspath(video_path)
+                    with open(ltx_json_path, 'w') as json_file:
+                        json.dump(result, json_file, indent=2)
+                    print(f"LTX response JSON saved to: {ltx_json_path}")
+                    
                 except Exception as e:
                     raise RuntimeError(f"LTX video generation failed: {str(e)}")
             else:
@@ -712,6 +743,15 @@ def generate_scenes(scenes, video_engine="luma", skip_sound_effects=False, initi
                 response = requests.get(generation.assets.video, stream=True)
                 with open(video_path, 'wb') as file:
                     file.write(response.content)
+                
+                # Save the Luma response JSON to the video directory
+                luma_response_dict = generation.model_dump()
+                luma_json_path = f"{os.path.splitext(video_path)[0]}_luma_response_{timestamp}.json"
+                # Add the local path to the response
+                luma_response_dict['local_video_path'] = os.path.abspath(video_path)
+                with open(luma_json_path, 'w') as json_file:
+                    json.dump(luma_response_dict, json_file, indent=2, default=str)
+                print(f"Luma response JSON saved to: {luma_json_path}")
             
             scene_videos.append(video_path)
             
@@ -1137,6 +1177,8 @@ def main():
                        help='Only generate scene metadata JSON without video generation')
     parser.add_argument('--script_file', type=str, default='movie_script2.txt',
                        help='Path to the movie script file (default: movie_script2.txt)')
+    parser.add_argument('--random_script', action='store_true',
+                       help='Generate a random script using the random_script_generator')
     parser.add_argument('--skip_narration', action='store_true',
                        help='Skip narration generation')
     parser.add_argument('--skip_sound_effects', action='store_true',
@@ -1190,18 +1232,56 @@ def main():
         return
 
     # Normal flow (not continuing from a previous directory)
-    # Generate scene metadata with LLM-determined number of scenes
-    print(f"Analyzing script and generating scene metadata using {args.model}...")
-    try:
-        with open(args.script_file, 'r') as f:
-            script = f.read()
-    except FileNotFoundError:
-        print(f"Error: Script file '{args.script_file}' not found")
-        return
-    except Exception as e:
-        print(f"Error reading script file: {str(e)}")
-        return
+    # Generate a random script if requested
+    if args.random_script:
+        try:
+            import random_script_generator
+            print(f"Generating random script using {args.model}...")
+            script_data = random_script_generator.generate_random_script(args.model)
+            script = script_data["script"]
+            
+            # Create video directory if it doesn't exist yet
+            global video_dir, timestamp
+            if not video_dir:
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                video_dir = f"videos/video_{timestamp}"
+                os.makedirs(video_dir, exist_ok=True)
+            
+            # Save the script to the video directory
+            script_file_path = os.path.join(video_dir, f"random_script_{timestamp}.txt")
+            elements_file_path = os.path.join(video_dir, f"random_script_elements_{timestamp}.json")
+            
+            # Ensure the directory exists before writing files
+            os.makedirs(os.path.dirname(script_file_path), exist_ok=True)
+            
+            with open(script_file_path, "w") as f:
+                f.write(script)
+            
+            with open(elements_file_path, "w") as f:
+                json.dump(script_data["elements"], f, indent=2)
+                
+            print(f"Random script generated and saved to: {script_file_path}")
+            print(f"Script elements saved to: {elements_file_path}")
+            print("\nGenerated Script:")
+            print("-" * 80)
+            print(script)
+            print("-" * 80)
+        except Exception as e:
+            print(f"Error generating random script: {str(e)}")
+            return
+    # Read script from file if not using random script
+    else:
+        try:
+            with open(args.script_file, 'r') as f:
+                script = f.read()
+        except FileNotFoundError:
+            print(f"Error: Script file '{args.script_file}' not found")
+            return
+        except Exception as e:
+            print(f"Error reading script file: {str(e)}")
+            return
 
+    print(f"Analyzing script and generating scene metadata using {args.model}...")
     scenes_json, final_video = generate_video(
         script, 
         model_choice=args.model,
