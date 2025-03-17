@@ -63,7 +63,9 @@ def generate_video(
     skip_narration=False,
     skip_sound_effects=False,
     initial_image_path=None,
-    initial_image_prompt=None
+    initial_image_prompt=None,
+    first_frame_image_gen=False,
+    image_gen_model="fal"
 ):
     try:
         if not os.getenv("CREDENTIALS_FILE") or not os.path.exists(os.getenv("CREDENTIALS_FILE")):
@@ -72,8 +74,11 @@ def generate_video(
         if initial_image_path and initial_image_prompt:
             return "Error: Cannot provide both initial image path and prompt. Please choose one.", None
             
-        if initial_image_prompt and not os.getenv("LUMAAI_API_KEY"):
-            return "Error: Luma AI API key is required for image generation.", None
+        if (initial_image_prompt or first_frame_image_gen) and not (
+            (image_gen_model == 'luma' and os.getenv("LUMAAI_API_KEY")) or 
+            (image_gen_model == 'fal' and os.getenv("FAL_KEY"))
+        ):
+            return f"Error: {image_gen_model.upper()} API key is required for image generation.", None
         
         # Load custom environments if provided
         custom_environments = None
@@ -111,7 +116,9 @@ def generate_video(
             video_engine, 
             skip_sound_effects,
             initial_image_path=initial_image_path.name if initial_image_path else None,
-            initial_image_prompt=initial_image_prompt
+            initial_image_prompt=initial_image_prompt,
+            first_frame_image_gen=first_frame_image_gen,
+            image_gen_model=image_gen_model
         )
         
         # Stitch videos with sound effects and narration
@@ -196,15 +203,25 @@ Upload your Google Cloud service account credentials JSON file. You can create o
                     initial_image_path = gr.File(
                         label="Upload Initial Image",
                         file_types=["image"],
-                        type="filepath",
-                       
+                        type="filepath"
                     )
                 with gr.Row():
                     initial_image_prompt = gr.Textbox(
-                        label="Initial Image Generation Prompt (Luma AI API Key Required)",
+                        label="Initial Image Generation Prompt",
                         lines=5,
-                        placeholder="Enter prompt to generate initial image using Luma AI...",
-
+                        placeholder="Enter prompt to generate initial image..."
+                    )
+                    image_gen_model = gr.Radio(
+                        choices=["luma", "fal"],
+                        label="Image Generation Model",
+                        value="fal",
+                        info="Choose which model to use for image generation"
+                    )
+                with gr.Row():
+                    first_frame_image_gen = gr.Checkbox(
+                        label="Generate First Frame Images",
+                        value=False,
+                        info="Generate first frame images for each scene using the selected image model"
                     )
                 metadata_only = gr.Checkbox(label="Generate Metadata Only", value=False)
                 generate_btn = gr.Button("Generate Video")
@@ -283,6 +300,8 @@ Upload your Google Cloud service account credentials JSON file. You can create o
             skip_sound_effects,
             initial_image_path,
             initial_image_prompt,
+            first_frame_image_gen,
+            image_gen_model,
             use_random_script
         ):
             if initial_image_path and initial_image_prompt:
@@ -291,9 +310,12 @@ Upload your Google Cloud service account credentials JSON file. You can create o
                     video_output: None
                 }
                 
-            if initial_image_prompt and not os.getenv("LUMAAI_API_KEY"):
+            if (initial_image_prompt or first_frame_image_gen) and not (
+                (image_gen_model == 'luma' and os.getenv("LUMAAI_API_KEY")) or 
+                (image_gen_model == 'fal' and os.getenv("FAL_KEY"))
+            ):
                 return {
-                    metadata_output: "Error: Luma AI API key is required for image generation.",
+                    metadata_output: f"Error: {image_gen_model.upper()} API key is required for image generation.",
                     video_output: None
                 }
                 
@@ -352,7 +374,9 @@ Upload your Google Cloud service account credentials JSON file. You can create o
                     skip_narration=skip_narration,
                     skip_sound_effects=skip_sound_effects,
                     initial_image_path=initial_image_path,
-                    initial_image_prompt=initial_image_prompt
+                    initial_image_prompt=initial_image_prompt,
+                    first_frame_image_gen=first_frame_image_gen,
+                    image_gen_model=image_gen_model
                 )
                 
                 if random_script_info and not metadata_only:
@@ -412,6 +436,8 @@ Upload your Google Cloud service account credentials JSON file. You can create o
                 skip_sound_effects,
                 initial_image_path,
                 initial_image_prompt,
+                first_frame_image_gen,
+                image_gen_model,
                 use_random_script
             ],
             outputs=[metadata_output, video_output]

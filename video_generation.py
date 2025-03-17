@@ -491,7 +491,7 @@ def generate_scene_metadata(script, model="gemini", max_scenes=5, max_environmen
                 pass
         raise e
 
-def generate_scenes(scenes, video_engine="luma", skip_sound_effects=False, initial_image_path=None, initial_image_prompt=None, first_frame_image_gen=False):
+def generate_scenes(scenes, video_engine="luma", skip_sound_effects=False, initial_image_path=None, initial_image_prompt=None, first_frame_image_gen=False, image_gen_model="fal"):
     """
     Generate video scenes with optional initial image input.
     
@@ -500,8 +500,9 @@ def generate_scenes(scenes, video_engine="luma", skip_sound_effects=False, initi
         video_engine (str): Video generation engine to use ('luma' or 'ltx')
         skip_sound_effects (bool): Whether to skip sound effects generation
         initial_image_path (str): Path to local image to use as starting frame
-        initial_image_prompt (str): Prompt to generate initial image using Luma AI
+        initial_image_prompt (str): Prompt to generate initial image using image generation model
         first_frame_image_gen (bool): Whether to generate first frame images for each scene
+        image_gen_model (str): Image generation model to use ('luma' or 'fal')
     """
     scene_video_files = []  # List of lists, each inner list contains videos for one scene
     sound_effect_files = []
@@ -527,8 +528,12 @@ def generate_scenes(scenes, video_engine="luma", skip_sound_effects=False, initi
             print(f"Saved initial image to: {saved_image_path}")
             
         elif initial_image_prompt:
-            # Generate image using Luma AI
-            from luma_image_gen import generate_image
+            # Generate image using specified model
+            if image_gen_model == "luma":
+                from luma_image_gen import generate_image
+            else:  # fal
+                from fal_image_gen import generate_image
+                
             try:
                 # Use generated_images directory for initial generation
                 image_url, image_path = generate_image(initial_image_prompt, saved_image_path)
@@ -616,7 +621,13 @@ def generate_scenes(scenes, video_engine="luma", skip_sound_effects=False, initi
         scene_first_frame_url = None
         if first_frame_image_gen:
             print(f"Generating first frame image for Scene {scene['scene_number']}")
-            from luma_image_gen import generate_image
+            
+            # Import the appropriate image generation module
+            if image_gen_model == "luma":
+                from luma_image_gen import generate_image
+            else:  # fal
+                from fal_image_gen import generate_image
+                
             try:
                 # Create a directory for the scene's first frame
                 first_frame_dir = f"{scene_dir}/first_frame"
@@ -1016,6 +1027,7 @@ def generate_video(
     initial_image_path=None,
     initial_image_prompt=None,
     first_frame_image_gen=False,
+    image_gen_model="fal",
     continue_from_dir=None
 ):
     global video_dir, timestamp
@@ -1024,8 +1036,11 @@ def generate_video(
         if initial_image_path and initial_image_prompt:
             raise ValueError("Cannot provide both initial_image_path and initial_image_prompt. Please choose one.")
             
-        if (initial_image_prompt or first_frame_image_gen) and not os.getenv("LUMAAI_API_KEY"):
-            raise ValueError("Luma AI API key is required for image generation.")
+        if (initial_image_prompt or first_frame_image_gen) and not (
+            (image_gen_model == 'luma' and os.getenv("LUMAAI_API_KEY")) or 
+            (image_gen_model == 'fal' and os.getenv("FAL_KEY"))
+        ):
+            raise ValueError(f"Error: {image_gen_model.upper()} API key is required for image generation.")
         
         # If continuing from a previous directory
         if continue_from_dir:
@@ -1075,7 +1090,8 @@ def generate_video(
                 skip_sound_effects,
                 initial_image_path=initial_image_path,
                 initial_image_prompt=initial_image_prompt,
-                first_frame_image_gen=first_frame_image_gen
+                first_frame_image_gen=first_frame_image_gen,
+                image_gen_model=image_gen_model
             )
             
             # Get completed scene videos and sound effects
@@ -1157,7 +1173,8 @@ def generate_video(
             skip_sound_effects,
             initial_image_path=initial_image_path,
             initial_image_prompt=initial_image_prompt,
-            first_frame_image_gen=first_frame_image_gen
+            first_frame_image_gen=first_frame_image_gen,
+            image_gen_model=image_gen_model
         )
         
         # Stitch videos with sound effects and narration
@@ -1173,6 +1190,8 @@ def main():
                        help='Model to use for scene generation (default: gemini)')
     parser.add_argument('--video_engine', type=str, choices=['luma', 'ltx'], default='luma',
                        help='Video generation engine to use (default: luma)')
+    parser.add_argument('--image_gen_model', type=str, choices=['luma', 'fal'], default='fal',
+                       help='Image generation model to use for first frame generation (default: fal)')
     parser.add_argument('--metadata_only', action='store_true',
                        help='Only generate scene metadata JSON without video generation')
     parser.add_argument('--script_file', type=str, default='movie_script2.txt',
@@ -1201,8 +1220,11 @@ def main():
         print("Error: Cannot provide both initial_image_path and initial_image_prompt. Please choose one.")
         return
         
-    if (args.initial_image_prompt or args.first_frame_image_gen) and not os.getenv("LUMAAI_API_KEY"):
-        print("Error: Luma AI API key is required for image generation.")
+    if (args.initial_image_prompt or args.first_frame_image_gen) and not (
+        (args.image_gen_model == 'luma' and os.getenv("LUMAAI_API_KEY")) or 
+        (args.image_gen_model == 'fal' and os.getenv("FAL_KEY"))
+    ):
+        print(f"Error: {args.image_gen_model.upper()} API key is required for image generation.")
         return
 
     # If continuing from a previous directory
@@ -1224,6 +1246,7 @@ def main():
             initial_image_path=args.initial_image_path,
             initial_image_prompt=args.initial_image_prompt,
             first_frame_image_gen=args.first_frame_image_gen,
+            image_gen_model=args.image_gen_model,
             continue_from_dir=args.continue_from_dir
         )
         
@@ -1293,7 +1316,8 @@ def main():
         skip_sound_effects=args.skip_sound_effects,
         initial_image_path=args.initial_image_path,
         initial_image_prompt=args.initial_image_prompt,
-        first_frame_image_gen=args.first_frame_image_gen
+        first_frame_image_gen=args.first_frame_image_gen,
+        image_gen_model=args.image_gen_model
     )
     
     if isinstance(scenes_json, str) and not final_video:

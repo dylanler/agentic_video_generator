@@ -12,7 +12,11 @@ An end-to-end application that transforms text scripts into complete video produ
 - LoRA training and frame generation
 - Multi-model support (Gemini/Claude)
 - User-friendly Gradio web interface
-- Initial frame customization (via upload or Luma AI generation)
+- Initial frame customization options:
+  - Upload local images as starting frames
+  - Generate initial frames using Luma AI or FAL prompts
+  - First frame generation for each scene
+  - Choice between Luma AI and FAL for image generation
 - Support for custom starting frames with LTX engine
 - Random script generation with customizable elements
 - Flexible video initialization options:
@@ -338,32 +342,24 @@ Alternatively, you can use the command line interface for basic video generation
 # Basic usage with default script file
 python video_generation.py --model gemini --metadata_only
 
-# Specify a custom script file
-python video_generation.py --model gemini --script_file path/to/your/script.txt
+# Use FAL for image generation (default)
+python video_generation.py --model gemini --first_frame_image_gen
 
-# Generate metadata only with custom script
-python video_generation.py --model gemini --metadata_only --script_file path/to/your/script.txt
+# Use Luma AI for image generation
+python video_generation.py --model gemini --first_frame_image_gen --image_gen_model luma
 
-# Skip narration and sound effects
-python video_generation.py --model gemini --skip_narration --skip_sound_effects
+# Generate initial image with FAL
+python video_generation.py --model gemini --initial_image_prompt "your prompt" --image_gen_model fal
 
-# Use LTX engine without narration
-python video_generation.py --model gemini --video_engine ltx --skip_narration
-
-# Generate a random script and use it for video generation
-python video_generation.py --model gemini --random_script
-
-# Generate a random script separately
-python random_script_generator.py --model gemini
-
-# Generate a random script and immediately use it for video generation
-python random_script_generator.py --model gemini --video_gen --video_engine luma
+# Generate initial image with Luma AI
+python video_generation.py --model gemini --initial_image_prompt "your prompt" --image_gen_model luma
 ```
 
 ### Command Line Arguments
 
 - `--model`: Choose between 'gemini' or 'claude' for scene analysis (default: gemini)
 - `--video_engine`: Choose between 'luma' or 'ltx' for video generation (default: luma)
+- `--image_gen_model`: Choose between 'luma' or 'fal' for image generation (default: fal)
 - `--metadata_only`: Generate only scene metadata without video
 - `--script_file`: Path to your movie script file
 - `--random_script`: Generate a random script instead of using a script file
@@ -371,6 +367,7 @@ python random_script_generator.py --model gemini --video_gen --video_engine luma
 - `--skip_sound_effects`: Skip generating sound effects
 - `--max_scenes`: Maximum number of scenes to generate (default: 5)
 - `--max_environments`: Maximum number of unique environments to use (default: 3)
+- `--first_frame_image_gen`: Generate first frame images for each scene
 
 For random script generation:
 ```bash
@@ -610,6 +607,10 @@ FAL_API_KEY=your_fal_api_key
 ANTHROPIC_API_KEY=your_anthropic_api_key
 ELEVEN_LABS_API_KEY=your_eleven_labs_api_key
 ```
+
+Note: For image generation, you'll need either:
+- LUMA_API_TOKEN if using Luma AI for image generation
+- FAL_API_KEY if using FAL for image generation (default)
 
 Make sure to replace the `your_*` placeholders with your actual API keys and credentials.
 
